@@ -18,6 +18,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # TODO: generalization; file names
+# TODO: define a project structure and directory
 
 # TODO remove channels, stacking, skip traces (done)
 # TODO mute interactive filter choice and alpha
@@ -88,6 +89,7 @@ class SeismicStream:
         preproc_settings = self._settings['preproc']
         trafo_settings = self._settings['trafo']
         pck_settings = self._settings['picking']
+        plt_settings = self._settings['plotting']
 
         # preprocessing settings
         self.pad = preproc_settings['zero_padding']['apply'] # apply padding
@@ -107,6 +109,12 @@ class SeismicStream:
         self.vmax = trafo_settings['vmax']  # max testing velocity
         self.vstep = trafo_settings['velstep']  # velocity increment
         self.SFR_time = trafo_settings['SFR_time']  # time for the SFR
+
+        # plotting
+        self.kmin = plt_settings['FK']['kmin'] # min wave number
+        self.kmax = plt_settings['FK']['kmax'] # max wave number
+        self.norm_power = plt_settings['normalize_amps']['apply']# apply amplitude normalization
+        self.use_local_max_power = plt_settings['normalize_amps']['local_max']# use local maxima
 
     def _read_data(self, fname, geometry_file = None, source_index = 0,
                          channel_nr = 1001, pre_trigger=0):
@@ -570,7 +578,6 @@ class SeismicStream:
     def _normalize_amps(self, amps):
         """amplitude normalization"""
         norm_amps = np.zeros_like(amps)
-
         global_max = np.max(np.abs(amps))
 
         for i in range(norm_amps.shape[0]):
@@ -1194,59 +1201,59 @@ class SeismicStream:
 
         return amps
 
-    def _fk_transform_kpos(self):
-        """Transformation to F-K domain"""
-        receiver = self.receiver
-        source = self.source
-
-        # amplitude data & processing
-        if not self.tapered:
-            self._apply_taper()
-
-        if self._pst is None:
-            st = self._st.copy()
-        else:
-            st = self._pst.copy()
-
-        amps = self._amps(st=st)
-
-        # source-receiver offsets
-        if source > receiver[-1]:
-            amps = np.flipud(amps)
-
-        # sample spacing
-        dx = self.dx
-        dt = self.dt
-
-        # sample size
-        iX,iT = amps.shape
-        iF = nextpow2(iT)[1]
-        iK = nextpow2(iT)[1]
-
-        # wavenumber and frequencies
-        freq = np.fft.fftfreq(iF, dt)
-        k = np.fft.fftfreq(iK, dx)
-        kw = k*2*np.pi
-
-        # FK transformation
-        FK = np.fft.fft2(amps,s=(iK,iF))
-        FK = np.fft.fftshift(np.conjugate(np.transpose(FK)))
-
-        # select only positive frequencies
-        pos_freq = FK.shape[0] // 2
-        FK_unwrap = FK[:pos_freq,:]
-
-        # set negative wavenumber quadrant to 0
-        pos_kw = FK.shape[1] // 2
-        FK_unwrap[:,:pos_kw] = 0
-
-        FK_unwrap = np.flipud(FK_unwrap)
-        FK_unwrap = np.fft.fftshift(FK_unwrap,axes=1)
-
-        theta = np.angle(FK_unwrap)
-        FK_abs = abs(FK_unwrap)
-
-        return FK_abs, theta, kw, freq,iX,iT
+    # def _fk_transform_kpos(self):
+    #     """Transformation to F-K domain"""
+    #     receiver = self.receiver
+    #     source = self.source
+    #
+    #     # amplitude data & processing
+    #     if not self.tapered:
+    #         self._apply_taper()
+    #
+    #     if self._pst is None:
+    #         st = self._st.copy()
+    #     else:
+    #         st = self._pst.copy()
+    #
+    #     amps = self._amps(st=st)
+    #
+    #     # source-receiver offsets
+    #     if source > receiver[-1]:
+    #         amps = np.flipud(amps)
+    #
+    #     # sample spacing
+    #     dx = self.dx
+    #     dt = self.dt
+    #
+    #     # sample size
+    #     iX,iT = amps.shape
+    #     iF = nextpow2(iT)[1]
+    #     iK = nextpow2(iT)[1]
+    #
+    #     # wavenumber and frequencies
+    #     freq = np.fft.fftfreq(iF, dt)
+    #     k = np.fft.fftfreq(iK, dx)
+    #     kw = k*2*np.pi
+    #
+    #     # FK transformation
+    #     FK = np.fft.fft2(amps,s=(iK,iF))
+    #     FK = np.fft.fftshift(np.conjugate(np.transpose(FK)))
+    #
+    #     # select only positive frequencies
+    #     pos_freq = FK.shape[0] // 2
+    #     FK_unwrap = FK[:pos_freq,:]
+    #
+    #     # set negative wavenumber quadrant to 0
+    #     pos_kw = FK.shape[1] // 2
+    #     FK_unwrap[:,:pos_kw] = 0
+    #
+    #     FK_unwrap = np.flipud(FK_unwrap)
+    #     FK_unwrap = np.fft.fftshift(FK_unwrap,axes=1)
+    #
+    #     theta = np.angle(FK_unwrap)
+    #     FK_abs = abs(FK_unwrap)
+    #
+    #     return FK_abs, theta, kw, freq,iX,iT
 
     def _fk_transform(self):
         """Transformation to F-K domain"""
@@ -1311,7 +1318,13 @@ class SeismicStream:
 
         # kwpos = np.linspace(0, np.max(kw), npoints)
         kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-        kmax = np.max(kwpos[:npoints // 2])
+
+        if self.kmax is None:
+            self.kmax = np.max(kwpos[:npoints // 2])
+
+        kmin = np.argmin(np.abs(kwpos - self.kmin))
+        kmax = np.argmin(np.abs(kwpos - self.kmax))
+        #kmax = np.max(kwpos[:npoints // 2])
 
         # tapering function
         taper_func = getattr(signal.windows, 'hann')
@@ -1324,8 +1337,7 @@ class SeismicStream:
         while terminate == False:
 
             fig, ax = plt.subplots(figsize=(6, 4))
-            self._plotFK(FK_abs_filt[fmin:fmax, :npoints // 2], axes=ax,
-                         xlimit=kmax)  # xlimit=np.max(kwpos[:npoints//2]))
+            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax)  # xlimit=np.max(kwpos[:npoints//2]))
             text = '\n'.join((
                 r'$\bf{Keyboard \quad commands:}$',
                 r'Press $\bf{e}$ to stop the process.',
@@ -1351,7 +1363,6 @@ class SeismicStream:
                 points = []
                 for i in range(len(x)):
                     points.append((x[i], y[i]))
-
 
                 fp = np.array([np.round(points[i][1], 4) for i in range(len(points))])
                 kp = np.array([np.round(points[i][0], 4) for i in range(len(points))])
@@ -1412,10 +1423,8 @@ class SeismicStream:
 
         if show:
             fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-            self._plotFK(FK_abs[fmin:fmax, :npoints // 2], axes=ax[0],
-                         xlimit=kmax)
-            self._plotFK(FK_abs_filt[fmin:fmax, :npoints // 2], axes=ax[1],
-                         xlimit=kmax)
+            self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0])
+            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1])
             ax[0].set_title('Raw data', fontweight='bold')
             ax[1].set_title('Post fk filter', fontweight='bold')
             plt.tight_layout()
@@ -1436,7 +1445,13 @@ class SeismicStream:
 
         # kwpos = np.linspace(0, np.max(kw), npoints)
         kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-        kmax = np.max(kwpos[:npoints // 2])
+        #kmax = np.max(kwpos[:npoints // 2])
+
+        if self.kmax is None:
+            self.kmax = np.max(kwpos[:npoints // 2])
+
+        kmin = np.argmin(np.abs(kwpos - self.kmin))
+        kmax = np.argmin(np.abs(kwpos - self.kmax))
 
         # tapering function
         taper_func = getattr(signal.windows, 'hann')
@@ -1505,10 +1520,8 @@ class SeismicStream:
 
         if show:
             fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-            self._plotFK(FK_abs[fmin:fmax, :npoints // 2], axes=ax[0],
-                         xlimit=kmax)
-            self._plotFK(FK_abs_filt[fmin:fmax, :npoints // 2], axes=ax[1],
-                         xlimit=kmax)
+            self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0])
+            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1])
             ax[0].set_title('Raw data', fontweight='bold')
             ax[1].set_title('Post fk filter', fontweight='bold')
             plt.tight_layout()
@@ -1722,7 +1735,8 @@ class SeismicStream:
         self.velocity = vels
         self.wavenumber = ks
 
-    def _MOPA(self, weighted = False, rel_err = 5/100, stopAtChi2=2,**kwargs):
+    def _MOPA(self, weighted = False, rel_err = 5/100, abs_err = None,
+              stopAtChi2=2,outfile = None, **kwargs):
         """Multi-offset phase analysis (MOPA; Strobbia and Foti, 2014)"""
 
         dt = self.dt
@@ -1788,9 +1802,13 @@ class SeismicStream:
                 # weights
                 weights = np.ones_like(phi)
                 if weighted:
-                    # var = np.var(phi - np.mean(phi))
-                    # weights *= 1 / var
-                    weights = 1/(rel_err*phi)
+                    if abs_err is None:
+                        error = rel_err*phi
+                    else:
+                        error = abs_err
+
+                    var = np.var(error)
+                    weights *= 1/var
 
                 # linear LSQR to find k and phi0 of phi = -k*offset+phi0
                 k0, phi0 = linear_LSQR(offsets_inv, phi, weights)
@@ -1882,6 +1900,11 @@ class SeismicStream:
                 ax[2].set_xlim([self.fmin, self.fmax])
                 ax[0].set_title('MOPA - Shotfile: ' + self.pre, fontweight='bold')
                 fig.align_ylabels(ax)
+
+            if outfile:
+                fig.savefig(outfile)
+                plt.close()
+            else:
                 plt.show()
 
             # dispersion curve
@@ -1927,6 +1950,8 @@ class SeismicStream:
 
             phase = np.angle(u[:, f_index])
             phase_unwrapped = np.unwrap(phase, axis=0)
+            if source > receiver[-1]:
+                phase_unwrapped = np.flipud(phase_unwrapped)
             di = np.diff(phase_unwrapped)  # phase difference between adjacent geophones
 
             phase_diff[j,:] = di
@@ -1936,10 +1961,23 @@ class SeismicStream:
     def _norm_power(self,power):
         """normalize amplitudes"""
 
-        norm = np.max(np.abs(power))
-        power = np.abs(power) / norm
+        # norm = np.max(np.abs(power))
+        # power = np.abs(power) / norm
 
-        return power
+        norm_power = np.zeros_like(power)
+        global_max = np.max(np.abs(power))
+
+        for i in range(norm_power.shape[1]):
+            pow = power[:,i]
+            if self.use_local_max_power:
+                local_max = np.max(np.abs(pow))
+                if local_max != 0:
+                    pow = pow / np.max(np.abs(pow))
+            else:
+                pow = pow/global_max
+            norm_power[:,i] = pow
+
+        return norm_power
 
     def _dcpicking(self, pck_mode = 'auto', axes=None,**kwargs):
         """automatic or interactive dispersion curve picking"""
@@ -2066,6 +2104,7 @@ class SeismicStream:
 
         mintrace = 0
         maxtrace = win_len
+        win_id = 0
 
         while maxtrace <= len(all_receiver):
 
@@ -2133,10 +2172,11 @@ class SeismicStream:
 
                     if fk_filter:
                         if path2fk is not None:
-                            if os.path.isfile(path2fk):
-                                temp_stream._fk_filter_from_file(fname=path2fk, show=show_FK)
-                        else:
-                            temp_stream._fk_filter_from_pick(fname=path2fk, show=False)
+                            fid = os.path.join(path2fk,f'win{win_id}')
+                            if os.path.isfile(fid):
+                                temp_stream._fk_filter_from_file(fname=fid, show=show_FK)
+                            else:
+                                temp_stream._fk_filter_from_pick(fname=fid, show=False)
 
                     if apply_trafo:
                         temp_stream._apply_trafo(do_pick=do_pick,
@@ -2161,6 +2201,8 @@ class SeismicStream:
                                         vel=temp_stream._picks[self._pck_mode][0]['v'])
 
                         curve._save(prjdir,fname,ext)
+
+                    win_id += 1
 
         return streams_dict
 
@@ -2613,7 +2655,7 @@ class SeismicStream:
         else:
             return fig
 
-    def _plotFK(self,FK_data,xlimit,axes= None, outfile=None, fmt=None, show=True,
+    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True,
                              **kwargs):
         """plot FK image"""
 
@@ -2622,14 +2664,33 @@ class SeismicStream:
         else:
             ax = axes
 
-        if kwargs.pop("normalize", True):
+        # transformation
+        if FK_data is None:
+            FK_data, theta, kw, freq, iX, iT = self._fk_transform()
+            npoints = FK_data.shape[1]
+            kwpos = np.linspace(0, 2 * np.max(kw), npoints)
+
+            fpos = freq[:npoints // 2]
+            fmin = np.argmin(np.abs(fpos - self.fmin))
+            fmax = np.argmin(np.abs(fpos - self.fmax))
+
+            if self.kmax is None:
+                self.kmax = np.max(kwpos[:npoints // 2])
+
+            kmin = np.argmin(np.abs(kwpos - self.kmin))
+            kmax = np.argmin(np.abs(kwpos - self.kmax))
+
+            FK_data = FK_data[fmin:fmax,kmin:kmax]
+
+        # Normalization
+        if self.norm_power:
             FK_data = self._norm_power(FK_data)
             label = "amplitudes (normalized)"
         else:
             label = "amplitudes"
 
         img = ax.imshow(abs(FK_data), aspect='auto', origin='lower',
-                           extent=[0, xlimit, self.fmin, self.fmax])
+                           extent=[self.kmin, self.kmax, self.fmin, self.fmax])
         ax.set_ylabel('frequency (Hz)')
         ax.set_xlabel('wavenumber (rad/m)')
         ax.grid(linestyle=':')
@@ -2763,8 +2824,12 @@ class SeismicStream:
 
         dispersive_energy = self.dispersive_energy
 
-        if kwargs.pop("normalize", True):
+        if self.norm_power:
+            # TODO: tmp work around
+            local_max = self.use_local_max_power
+            self.use_local_max_power = False
             dispersive_energy = self._norm_power(dispersive_energy)
+            self.use_local_max_power = local_max
             label = "amplitudes (normalized)"
             limits = (0, 1)
         else:
@@ -2779,7 +2844,6 @@ class SeismicStream:
         elif keyy == "k":
             daty = self.wavenumber
             labely = "wavenumber (rad/m)"
-
 
         datx = self.frequency
         labelx = "frequency (Hz)"

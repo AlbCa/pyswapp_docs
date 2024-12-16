@@ -22,12 +22,15 @@ def create_settings_dict(
                          picking = 'manual',
                          fmin=0, fmax=100, vmin=100,
                          vmax=1000, velstep=1, SFR_time = 2,
+                         kmin = 0, kmax = None,
+                         normalize_power = True,local_max_power = False,
                          ):
     """create settings dictionary"""
     settings_dict = {"preproc":{"zero_padding": {"apply": bool(zero_padding),
-                                                "df": freq_step},
+                                                 "df": freq_step},
                                 "normalize_amps": {"apply": bool(normalize),
-                                                    "local_max": bool(local_max)}},
+                                                   "local_max": bool(local_max)}},
+
                      "trafo": {"type": str(trafo),
                                  "fmin": float(fmin),
                                  "fmax": float(fmax),
@@ -35,7 +38,12 @@ def create_settings_dict(
                                  "vmax": float(vmax),
                                  "velstep": int(velstep),
                                  "SFR_time": float(SFR_time)},
-                     "picking": {"mode": str(picking)},}
+                     "picking": {"mode": str(picking)},
+
+                     "plotting": {"FK":{"kmin": float(kmin),
+                                        "kmax": kmax,},
+                                 "normalize_amps": {"apply": bool(normalize_power),
+                                                    "local_max": bool(local_max_power)}}}
 
     return settings_dict
 
@@ -346,7 +354,7 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
     Ni = np.transpose(A) @ w @ A
     Mi = np.transpose(G) @  G
 
-    m = np.linalg.inv(Ni + lam ** 2 * Mi) @ np.transpose(A) @ dphi
+    m = np.linalg.inv(Ni + lam ** 2 * Mi) @ np.transpose(A) @ w @ dphi
     phi_vel = -2*np.pi*f/m
     phi_model = A@m
 
