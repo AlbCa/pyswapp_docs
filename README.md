@@ -1,5 +1,5 @@
-# sw
-**sw** is an open-source Python library for processing surface wave seismic data.
+# SWA
+**swa** is an open-source Python library for processing surface wave seismic data.
 
 ---
 
