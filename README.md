@@ -53,15 +53,15 @@ Scripts demonstrating various use cases:
 ---
 
 ### **Notebooks: `WR2024`**
-Interactive Jupyter notebooks for advanced workflows:
-- **`nb1.ipynb`**  
+Interactive Jupyter notebooks for XXI Workshop di Geofisica (Rovereto) workflows:
+- **`wr2024_nb1.ipynb`**  
   Data handling, interactive plotting, picking, and combining dispersion curves.
-- **`nb2.ipynb`**  
-  MASW pseudo-2D analysis.
-- **`nb3.ipynb`**  
-  Multi-Offset Phase Analysis (MOPA).
-- **`nb4.ipynb`**  
-  Tomography-like approaches.
+- **`wr2024_nb2.ipynb`**  
+  MASW pseudo-2D
+- **`wr2024_nb3.ipynb`**  
+  Tomography-like approach
+- **`fk_filtering.ipynb`**  
+  Interactive f-k filtering test
 
 ---
 
