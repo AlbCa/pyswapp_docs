@@ -90,4 +90,4 @@ Directory for raw and processed data:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/AlbCa/sw.git
+   git clone https://github.com/AlbCa/swa.git
