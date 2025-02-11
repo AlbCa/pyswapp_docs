@@ -1,0 +1,371 @@
+import os
+import re
+from collections.abc import Iterable
+
+import glob
+import numpy as np
+import pandas as pd
+
+import warnings
+
+supported_extensions = ['.sg2','.dat','.syn','.sgy','.syn']
+
+# %% file tools for reading/writing
+def print_inventory(dct):
+    """print the dictionary items to console"""
+    for key in dct.keys():
+        print("{}\t|\t{}".format(key, len(dct[key])))
+
+# %% file tools
+def get_num_from_str(string):
+    """extract numbers from string"""
+
+    p = '[\d]+[.,\d]+|[\d]*[.][\d]+|[\d]+'
+
+    if re.search(p, string) is not None:
+        return re.findall(p, string)
+
+
+def natural_sort(l):
+    """sort list based on numbers in ascending order"""
+    convert = lambda text: int(text) if text.isdigit() else text.lower()
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
+    return sorted(l, key=alphanum_key)
+
+
+def read_FKfilter(fin):
+    """import existing FK filters from file"""
+    f = open(fin, 'r')
+    lines = f.readlines()
+    points_dict= {}
+
+    for i,line in enumerate(lines):
+
+        line_split = line.split('\t')
+
+        if len(line_split) == 3:
+            key = line_split[1]
+            npoints = int(line_split[2])
+            points = np.loadtxt(fin,skiprows=i+1,max_rows=npoints,delimiter='\t')
+
+            if key not in points_dict.keys():
+                points_dict[key] = [points]
+            else:
+                points_dict[key].append(points)
+
+    return points_dict
+
+def save2csv(outfile, freq, vel, err):
+    """save dispersion curve in csv format"""
+
+    f = open(outfile, 'w')
+    f.write('#Frequency,Velocity,Velstd\n')
+    for line in range(len(freq)):
+        f.write('%.3f,%.3f,%.9f\n' %
+                (freq[line],
+                 vel[line],
+                 err[line]))
+    f.close()
+
+# %% helper function to read geometry file
+def read_geometry(geometry):
+    """read formikoj geometry files"""
+
+    geom = pd.read_csv(geometry,delimiter=',',header=None)
+    geom = np.asarray(geom)
+
+    nchannels = np.unique(geom[geom[:,-1]!=-1,-1])[0]
+    receiver_coordinates = geom[geom[:,3]==1,0:3]
+
+    if nchannels != len(receiver_coordinates):
+        warnings.warn(f'Number of channels ({nchannels}) and '
+              f'actual receiver count ({len(receiver_coordinates)}) not matching!')
+
+    source_coordinates = geom[geom[:, 4] != '-1',0:3]
+    shots = geom[geom[:, 4] != '-1', 4]
+
+    shot_files = []
+    for sht in shots:
+        shot_files.append(sht.split(';'))
+
+    return shot_files, source_coordinates, receiver_coordinates
+
+def get_shotfiles_from_geometry(path2raw, shot_files, extension = '.sg2', sort_ascending = True):
+    """get the paths to the shot files from the geometry.csv file"""
+    fnames = []
+    for fname in os.listdir(path2raw):
+        if fname.endswith(extension):
+            fnames.append(fname)
+    fnames = natural_sort(fnames)
+
+    if not sort_ascending:
+        fnames = list(reversed(fnames))
+
+    path2sht = []
+
+    for sht in shot_files:
+        if isinstance(sht, Iterable):
+            sht_reps = []
+            for i, fname in enumerate(fnames):
+                sfn = str(re.findall(r'\d+', fname.replace(extension,''))[0])
+
+                for rep in sht:
+                    if rep ==sfn:
+                        sht_reps.append(os.path.join(path2raw, fnames[i]))
+
+            path2sht.append(sht_reps)
+        else:
+            for i, fname in enumerate(fnames):
+                sfn = str(re.findall(r'\d+', fname.replace(extension,''))[0])
+
+                if sht == sfn:
+                    path2sht.append(os.path.join(path2raw, fnames[i]))
+
+    return path2sht
+
+def create_geometry(path2shts, path2geom = 'geometry.csv'):
+    """
+    create a geometry.csv from seismic shot files (.sgy and .sg2 file formats)
+
+    This function can be used to convert the source and geophone coordinate information contained
+    in the seismic raw data to the geometry file format. The geometry file is a csv file that stores
+    an abstract representation of the survey layout, that can be optionally passed to some modules.
+    Check out docs/geometry_file.pdf for a description of the format.
+
+    Parameters
+    ----------
+    path2shts: list, paths to shot files
+    path2geom: str, path to geometry file
+    """
+
+    from swa.stream import SeismicStream
+
+    geom = pd.DataFrame(columns=['x','y','z','geo','shot','first_geo','ngeo'])
+
+    # add receiver stations first
+    nids = 0
+    for i in range(len(path2shts)):
+
+        # seismic stream containing survey geometry
+        stream = SeismicStream(path2shts[i])
+        stream.read_data_geom(path2shts[i], channel_nr=1001)
+
+        # shot parameters
+        stream.set_shot_params()                    # set the shot parameters from the seismic data
+        receiver = stream.receiver                  # geophone x-coordinates
+        ngeo = stream.nchannels                     # number of geophones
+        nids += ngeo
+
+        df = pd.DataFrame({'x':receiver,
+                           'y': 0,
+                           'z': 0,
+                           'geo': 1,
+                           'shot': '-1',
+                           'first_geo': 1,
+                           'ngeo': -1})
+
+        geom = pd.concat([geom, df])
+        nids += ngeo
+
+    geom = geom.drop_duplicates(subset=['x']).reset_index(drop=True)
+    geom = geom.sort_values(by = 'x')
+    geom.insert(0, 'id', np.arange(len(geom)))
+
+    # add the shots
+    for i in range(len(path2shts)):
+
+        # seismic stream containing survey geometry
+        stream = SeismicStream(path2shts[i])
+        stream.read_data_geom(path2shts[i], channel_nr=1001)
+
+        # shot parameters
+        stream.set_shot_params()                    # set the shot parameters from the seismic data
+        first_geo = stream.receiver[0]              # first geophone
+        ngeo = stream.nchannels                     # number of geophones
+        name = stream.pre                           # file name
+        sin = str(int(get_num_from_str(name)[0]))   # numerical part of file
+        source = stream.source                      # source x-coordinate
+        nids += ngeo
+
+        sid = np.where(geom.x == source)[0]
+
+        first_geo_id = geom.id[geom.x == first_geo].item()
+
+        if len(sid) > 0:
+            if geom.loc[sid[0],'shot'] == '-1':
+                geom.loc[sid[0],'shot'] = sin
+            else:
+                geom.loc[sid[0],'shot'] += ';' + sin
+
+            geom.loc[sid[0],'first_geo'] = first_geo_id+1
+            geom.loc[sid[0],'ngeo'] = ngeo
+
+        else:
+            df = pd.DataFrame({'x':source,
+                               'y': 0,
+                               'z': 0,
+                               'geo': 0,
+                               'shot': sin,
+                               'first_geo': first_geo_id+1,
+                               'ngeo': ngeo})
+            geom = pd.concat([geom, df])
+
+    geom = geom.sort_values(by='x')
+    geom = geom.drop(columns=['id'])
+
+    geom.to_csv(path2geom, index=False, header=False)
+
+def get_fileList(path2raw):
+    """get the paths to the shot files from the geometry.csv file"""
+
+    for ext in supported_extensions:
+        fname_list = glob.glob(os.path.join(path2raw, '*' + ext))
+
+        if len(fname_list) > 0:
+            return fname_list, ext
+
+    return None, None
+
+def save2DC(outfile, parkseis_params, freq, vel, snr):
+    """save dispersion curve in parkseis format"""
+
+    receiver = parkseis_params['receiver']
+    midpoint = parkseis_params['midpoint']
+    source = parkseis_params['source']
+    sn = parkseis_params['record_number']
+    channel = parkseis_params['channel']
+
+    f = open(outfile, 'w')
+    f.write(f'>>Start\t{len(freq)}\n')
+    for line in range(len(freq)):
+        f.write('%s\t%.3f\t%.3f\t%d\n' %
+                ('DATA',
+                 freq[line],
+                 vel[line],
+                 snr[line]))
+    f.write('>>End\n')
+    f.write(f'X-Coord: {midpoint}\n')
+    f.write(f'MidXYZ| {midpoint}| 0.000| 0.000\n')
+    f.write(f'SourceXYZ| {source}| 0.000| 0.000\n')
+    f.write(f'MidSTA| {channel[0]}| {channel[-1]}\n')
+    f.write(f'MidXForXcoord| {receiver[0]}\n')
+    f.write(f'XMinMax| {receiver[0]}| {receiver[-1]}\n')
+    f.write('   Distance Unit: meter\n')
+    f.write('TitleLabel|Dispersion\n')
+    f.write('FRQLabel|Frequency (Hz)\n')
+    f.write('PHSLabel|Phase Velocity (m/sec)\n')
+    f.write('RTOLabel|Signal-To-Noise Ratio (S/N)\n')
+    f.write(f'   Record No.      = {sn}\n')
+    f.write('Data Type = Dispersion\n')
+    f.close()
+
+
+def read_DC_Park(fname):
+    """read a dispersion curve file from ParkSEIS and store as csv with x,freq,phase_vel,snr columns"""
+
+    f = open(fname)  # open file
+    lines = f.readlines()  # lines in file
+
+    lsp = lines[0].split()
+    ndata = int(lsp[1])
+
+    dat = np.zeros((ndata, 3))
+    row = 0
+    for line in lines[1:]:
+        lsp = line.split()
+
+        if (lsp[0] == 'DATA') & (len(lsp) == 4):
+            dat[row, 0] = float(lsp[1])  # freq
+            dat[row, 1] = float(lsp[2])  # phase vel
+            dat[row, 2] = float(lsp[3])  # snr
+
+            row += 1
+
+        if lsp[0] == '>>End':
+            print('end of line')
+            break
+
+    if ndata != len(dat):
+        print('data size not matching')
+
+    x = 0
+    for line in lines[len(dat) + 2:]:
+
+        lsp = line.split()
+        if lsp[0] == 'X-Coord:':
+            x = float(lsp[1])
+            break
+
+    return dat, x
+
+
+def DC2csv(fpath,prjdir):
+    """convert a dispersion curve file from ParkSEIS to a csv file"""
+
+    dat,x = read_DC_Park(fpath)
+
+    if os.path.isdir(prjdir + "0c_csv/") == False:
+        os.mkdir(prjdir + "0c_csv/")
+
+    path, fname = os.path.split(fpath)
+    pre, ext = os.path.splitext(fname)
+    outfile = prjdir + f"0c_csv/{pre}.csv"
+
+    f = open(outfile,'w')
+    f.write('#Frequency,Velocity\n')
+    for line in range(len(dat)):
+        f.write('%.9f,%.9f\n' %
+                (dat[line,0],
+                 dat[line,1]))
+    f.close()
+
+    return outfile,x
+
+# TODO: change the savename???
+def read_DC_csv(fname):
+    """read a dispersion curve file from a csv file"""
+    dat = np.genfromtxt(fname,skip_header=1,delimiter=',')
+    head, tail = os.path.split(fname)
+
+    if head.split('/')[-2] != 'cmb':
+        try:
+            x = float(head.split('/')[-2])
+        except IndexError:
+            return dat,0
+        except ValueError:
+            return dat,0
+    else:
+        x = float(tail.split('xmid')[1].replace('.csv',''))
+
+    return dat,x
+
+
+def safe_makedirs(*args):
+    """safe generation of directories"""
+    try:
+        return os.makedirs(*args)
+    except OSError:
+        pass  # Ignore errors
+
+
+def combine_dict(d1, d2):
+    """combine two dictionaries"""
+
+    for key, value in d2.items():
+        if key in d1:
+            d1[key].append(value)
+        else:
+            d1[key] = [value]
+    return d1
+
+
+# %% helper functions for waveform transformation
+def nextpow2(A):
+    """exponent of next higher power of 2 (see matlab)"""
+    p = 1
+    count = 0
+    while p < abs(A):
+        p *= 2
+        count+=1
+    return count,p
+
