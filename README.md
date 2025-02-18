@@ -69,6 +69,10 @@ Directory for raw and processed data:
     Manually created geometry file.
   - **`geometry_test.csv`**  
     Automatically created geometry file.
+- **`real_data/`**  
+  Real data sets.
+  - **`Moriago/`**  
+    2D active dataset.
 
 ---
 
