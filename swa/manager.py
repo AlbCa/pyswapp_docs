@@ -476,7 +476,7 @@ class BaseManager:
                 self._set_data(tmp, sin, rep, procset, wid)
 
                 if attr in ['dispersionImage','dispersionImageComposite']:
-                    self._set_FV(tmp, sin, rep, procset=procset, method=method)
+                    self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
 
                 tmp.plot(attr, **kwargs)
         else:
