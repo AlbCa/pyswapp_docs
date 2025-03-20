@@ -255,7 +255,7 @@ class BaseManager:
                 if inplace:
                     self.current_stream = selection
                     if verbose:
-                        print(f'Currently selected data: (SIN,REP) = {self.selected_ids}')
+                        print(f'Currently selected data: (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})')
                 return selection
             else:
                 raise KeyError(f'The key rep = {rep} does not exist for sin = {sin}.')
@@ -375,17 +375,18 @@ class BaseManager:
         func = getattr(dc, attr)
         dc = func(**kwargs)
 
-        xmid = curve_data['xmid'].unique().item()
+        xmids = curve_data['xmid'].unique()#item()
 
-        dc = {
-            'xmid': xmid,
-            'method': method,
-            'dc_mode': params['dc_mode'],
-            'f': dc.frequency,
-            'v': dc.velocity,
-            'err': dc.error}
+        for xmid in xmids:
+            dc = {
+                'xmid': xmid,
+                'method': method,
+                'dc_mode': params['dc_mode'],
+                'f': dc.frequency,
+                'v': dc.velocity,
+                'err': dc.error}
 
-        self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
+            self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
 
     def process_curve(self, attr, procset=None, method='tomo2D', dc_mode=0, use_windows = False, **kwargs):
         """apply a process to a dispersion curve"""
@@ -597,7 +598,7 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr}to (SIN,REP) = {self.selected_ids} ..... ', end='')
+            print(f'Applying {attr} to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
             self.preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
 
@@ -630,7 +631,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr} transformation to (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Applying {attr} transformation to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.transform(attr,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
@@ -661,7 +663,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Dispersion curve extraction of (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Dispersion curve extraction of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, **kwargs)
 
             endtime = time.time()
@@ -694,7 +697,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr} to dispersion curve of (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Applying {attr} to dispersion curve of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.process_curve(attr=attr, procset=procset, method=method,
                                dc_mode=dc_mode, use_windows = use_windows, **kwargs)
             endtime = time.time()
@@ -754,7 +758,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Save dispersion curves corresponding to (SIN,REP) = {self.selected_ids} to file ..... ', end = '')
+            print(f'Save dispersion curves corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' to file ..... ', end = '')
             xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
             xmids += xmid
             endtime = time.time()
@@ -770,7 +775,7 @@ class MASW2DManager(BaseManager):
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
                     sys.stdout.write(f'\rSave dispersion curves corresponding to (SIN,REP) = '
-                          f'{self.selected_ids} to file ..... ')
+                          f'({sin}, {rep}) to file ..... ')
                     sys.stdout.flush()
 
                     xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
@@ -797,7 +802,7 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Moving window along (SIN,REP) = {self.selected_ids} ..... ', end='')
+            print(f'Moving window along (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
             windows = self.current_stream.moving_window(**kwargs)
 
@@ -854,7 +859,7 @@ class MASW2DManager(BaseManager):
                 wids = self._sql.get_wids(sin, rep, procset)
                 if use_windows:
                     for wid in wids:
-                        params['sin'] =  sin
+                        params['sin'] = sin
                         params['rep'] = rep
                         params['wid'] = wid
 
@@ -862,7 +867,9 @@ class MASW2DManager(BaseManager):
 
                         dc = DispersionCurve()
                         dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                        self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
+
+                        for xmid in curve_data['xmid'].unique():
+                            self.CC.append(dc, xmid, source=None, color=color)
 
                 else:
                     params['sin'] = sin
@@ -874,7 +881,6 @@ class MASW2DManager(BaseManager):
                     dc = DispersionCurve()
                     dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
                     self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
-
 
     def combine(self, procset = None, dc_mode = 0, use_windows=False, **kwargs):
         """combine dispersion curves with same receiver spread location"""
@@ -975,6 +981,7 @@ class MASW2DManager(BaseManager):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
             self._save_curve(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
 
 class Tomo2DManager(BaseManager):
     def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
@@ -1099,8 +1106,8 @@ class Tomo2DManager(BaseManager):
                     tmp = copy.deepcopy(current_stream)
                     self._set_data(tmp, sin, rep, procset, wid)
 
-                    cur_pd, cur_fids, cur_freq = current_stream.compute_phasediffs()
-                    cur_rec = current_stream.receiver
+                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs()
+                    cur_rec = tmp.receiver
 
                     cur_sht_geom, cur_rec_geom = self._sql.get_geometry(sin, rep)
                     rin = np.zeros(len(cur_rec) - 1)

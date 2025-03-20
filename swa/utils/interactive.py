@@ -184,6 +184,7 @@ class SeismoInteractive(DraggablePoints):
         self._reset_last = False
         self.slope = None
         self.tbox = None
+        self.plot_slope = None
 
     def _add_point(self, x, y=None):
         if isinstance(x, MouseEvent):
@@ -219,8 +220,8 @@ class SeismoInteractive(DraggablePoints):
         if (len(self._points) == 2) & (self.receiver is not None):
             idx, t = zip(*sorted(self._points.items()))
 
-            x1 = self.receiver[round(idx[0])]
-            x2 = self.receiver[round(idx[1])]
+            x1 = self.receiver[int(idx[0])]
+            x2 = self.receiver[int(idx[1])]
 
             t1 = t[0]
             t2 = t[1]
@@ -242,6 +243,9 @@ class SeismoInteractive(DraggablePoints):
 
         if event.key == 'r':
             #print(f'You pressed {event.key}. Reset mute')
+            if self.tbox is not None:
+                self.tbox.remove()
+
             self._reset = True
             plt.close()
 
@@ -252,24 +256,31 @@ class SeismoInteractive(DraggablePoints):
 
         if event.key == 't':
             #print(f'You pressed {event.key}.')
+            if self.tbox is not None:
+                self.tbox.remove()
+
             self._key = 't'
             self.ax.set_title('Top mute active', fontweight='bold')
             self.canvas.draw_idle()
 
         if event.key == 'b':
             #print(f'You pressed {event.key}.')
+
+            if self.tbox is not None:
+                self.tbox.remove()
+
             self._key = 'b'
             self.ax.set_title('Bottom mute active', fontweight='bold')
             self.canvas.draw_idle()
 
         if event.key == 'v':
             #print(f'You pressed {event.key}.')
+            if self.tbox is not None:
+                self.tbox.remove()
+
             self._estimate_velocity()
             self.ax.set_title('Velocity estimation', fontweight='bold')
             self.canvas.draw_idle()
-
-            if self.tbox is not None:
-                self.tbox.remove()
 
     @property
     def key(self):

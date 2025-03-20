@@ -882,6 +882,8 @@ class SeismicStream:
             vel = kwargs.setdefault('vel', None)
             bulk_shift = kwargs.setdefault('bulk_shift', 0)
             self._lmo(vel, bulk_shift)
+        elif by == 'mute':
+            self._mute(**kwargs)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -938,7 +940,7 @@ class SeismicStream:
 
         while terminate is False:
 
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(7, 5))
             self._plotSeismogram(axes=ax, amp_scale=1)
 
             text = '\n'.join((
