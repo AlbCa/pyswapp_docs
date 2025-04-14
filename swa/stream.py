@@ -885,7 +885,7 @@ class SeismicStream:
             self._mute(**kwargs)
         elif by == 'mute_trace':
             trace_indices = kwargs.setdefault('ids', [])
-            self._mute_trace(trace_indices)
+            self._mute_traces(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -921,7 +921,7 @@ class SeismicStream:
 
         self._pst = st_proc
 
-    def _mute_trace(self, trace_indices):
+    def _mute_traces(self, trace_indices):
         """set a trace to 0"""
 
         if self._pst is None:
