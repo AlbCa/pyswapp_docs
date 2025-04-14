@@ -714,8 +714,6 @@ class SeismicStream:
     def trim(self, by, **kwargs):
         """non interactive time or receiver based trimming of the trace data"""
 
-        trace_select = kwargs.setdefault('ids',np.arange(len(self.receiver)))
-
         if by == 'time':
             min = kwargs.setdefault('min', 0)
             max = kwargs.setdefault('max', 0)
@@ -731,10 +729,12 @@ class SeismicStream:
             xmid = kwargs.setdefault('xmid', self.midpoint)
             nwin = kwargs.setdefault('nwin', len(self.receiver))
             self._trim_by_trace_window(nwin, xmid)
-        elif by == 'index':
-            self._select_traces(trace_select)
+        elif by == 'select':
+            trace_indices = kwargs.setdefault('ids', np.arange(len(self.receiver)))
+            self._select_traces(trace_indices)
         elif by == 'remove':
-            self._remove_trace(trace_select)
+            trace_indices = kwargs.setdefault('ids', [])
+            self._remove_trace(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -778,7 +778,6 @@ class SeismicStream:
         else:
             #print('No process applied. Min and max offset out of bounds.')
             return []
-
 
     def _trim_by_receiver_separation(self,sep):
         """select channels with specified geophone separation"""
@@ -827,7 +826,7 @@ class SeismicStream:
         else:
             return None
 
-    def _select_traces(self, trace_select):
+    def _select_traces(self, trace_indices):
         """select a subset of a stream based on trace indices"""
 
         receiver = self.receiver
@@ -840,7 +839,7 @@ class SeismicStream:
         st_new = obspy.Stream()
         receiver_subset = []
         for i, trace in enumerate(st_proc):
-            if i in trace_select:
+            if i in trace_indices:
                 st_new.append(trace)
                 receiver_subset.append(receiver[i])
 
@@ -884,6 +883,9 @@ class SeismicStream:
             self._lmo(vel, bulk_shift)
         elif by == 'mute':
             self._mute(**kwargs)
+        elif by == 'mute_trace':
+            trace_indices = kwargs.setdefault('ids', [])
+            self._mute_trace(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -917,6 +919,21 @@ class SeismicStream:
                             corners = 2,
                             zerophase = True)
 
+        self._pst = st_proc
+
+    def _mute_trace(self, trace_indices):
+        """set a trace to 0"""
+
+        if self._pst is None:
+            st_proc = self._st.copy()
+        else:
+            st_proc = self._pst.copy()
+
+        for i, trace in enumerate(st_proc):
+            if i in trace_indices:
+                st_proc[i].data *= 0
+
+        # update
         self._pst = st_proc
 
     def _mute(self, tapering='mild'):
