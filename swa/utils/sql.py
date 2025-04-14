@@ -194,7 +194,6 @@ class SQL:
     def delete_data(self,table, params):
         """delete entry from database"""
         sql = """DELETE FROM %s WHERE """ % table
-        #        WHERE sin==%d AND rep==%d AND procset=='%s' AND wid==%d""" % (table,sin,rep,procset,wid)
 
         npar = len(params)
 
@@ -384,7 +383,6 @@ class SQL:
             self.to_sql(df, name=tn, if_exists='append', index=False)
         else:
             self.delete_data(tn, params)
-            #if self.check_data(tn, params):
             self.to_sql(df, name=tn, if_exists='append', index=False)
 
         # %% Table for frequency
@@ -412,7 +410,6 @@ class SQL:
             self.to_sql(df,name = tn, if_exists = 'append', index = False)
         else:
             self.delete_data(tn,params)
-            #if self.check_data(tn, params):
             self.to_sql(df, name = tn, if_exists = 'append', index = False)
 
     # def stack()
@@ -433,9 +430,14 @@ class SQL:
                    % (procset, wid, sin, rep, method))
             freq = self.read_sql(sql)
 
-            return FV, freq.frequency.values
-        else:
-            return pd.DataFrame(), []
+            if not FV.empty:
+                freq = freq.frequency.values
+                vel = FV.velocity.values
+                kw = FV.wavenumber.values
+                FV = FV.iloc[:, 7:7 + len(freq)].astype(complex).values
+                return vel, kw, freq, FV
+            else:
+                return None, None, None, None
 
     def get_wids(self, sin, rep, procset):
         """return the window ids for a sin/rep pair"""

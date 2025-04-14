@@ -198,6 +198,12 @@ class BaseManager:
         print(f' {np.round(endtime - starttime, 2)} s')
         print(f'Read {nfiles} files and applied geometry and settings.')
 
+    def print_stats(self, which = 'stream'):
+        """print stream information"""
+
+        stream = self.current_stream
+        stream.print_stats(which)
+
     def _write_data(self, data, sin, rep, procset, wid=-1):
         """write processed data to database"""
         self._sql.write_data(data, sin, rep, procset, wid)
@@ -215,15 +221,8 @@ class BaseManager:
     def _get_FV(self, sin, rep, procset, wid=-1, method='phaseshift'):
         """get FV data from database"""
 
-        FV, freq = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
-        if not FV.empty:
-            vel = FV.velocity.values
-            kw = FV.wavenumber.values
-            FV = FV.iloc[:, 7:].astype(complex).values
-
-            return vel, kw, freq, FV
-        else:
-            return None, None, None, None
+        vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
+        return vel, kw, freq, FV
 
     def _set_data(self, data, sin, rep, procset, wid=-1):
         """set processed data from database to current stream"""
