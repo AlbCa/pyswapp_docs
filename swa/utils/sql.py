@@ -94,6 +94,15 @@ class SQL:
 
         return table_list
 
+    def _append_shots_df(self, shots, geom, column_name):
+        """append the shots DataFrame"""
+
+        tmp = pd.DataFrame(geom.loc[geom.shots != '-1', [column_name]])
+        tmp[column_name] = tmp[column_name].str.split(';')
+        tmp = tmp.explode(column_name).astype(int)
+        shots[column_name] = tmp
+        return shots
+
     # %% Interaction with the geometry information
     def read_geometry(self,geometry_file):
         """read formikoj geometry file and add to database"""
@@ -112,6 +121,8 @@ class SQL:
         shots['shots'] = shots['shots'].str.split(';')
         shots = shots.explode('shots')
         shots.insert(2,'rep', shots.groupby('station_id').cumcount()+1)
+        shots = self._append_shots_df(shots, geom, 'first_geophone')
+        shots = self._append_shots_df(shots, geom, 'num_geophones')
 
         # geophone indices
         recs = pd.DataFrame(geom[geom.geophone > 0]['station_id'])
@@ -123,27 +134,50 @@ class SQL:
         self.to_sql(shots, 'shots', if_exists='replace')
         self.to_sql(recs, 'recs', if_exists='replace')
 
+
     def get_geometry(self, sin, rep = 1):
         """Return the geometry information (source and receiver coordinates) for one source location and shot index
            as DataFrames"""
 
-        sql = """SELECT s.sin, s.rep, g.x sx, g.y sy, g.z sz, g.first_geophone fg, g.num_geophones ng
-                 FROM geom g
-                 INNER JOIN shots s ON s.station_id == g.station_id
-                 WHERE s.rep==%d AND s.sin==%d""" % (rep,sin)
-        sht = self.read_sql(sql)
+        # return for one sin/rep pair
+        if sin != '*':
 
-        if len(sht) != 1:
-            raise ValueError
-
-        rec = pd.DataFrame(columns=['rin', 'rx', 'ry','rz'])
-        for i,rin in enumerate(np.arange(sht.fg.item(),sht.ng.item()+sht.fg.item())):
-            sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
+            sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
                      FROM geom g
-                     INNER JOIN recs r ON r.station_id == g.station_id
-                     WHERE r.rin==%d""" % rin
-            tmp = self.read_sql(sql)
-            rec = pd.concat([rec,tmp])
+                     INNER JOIN shots s ON s.station_id == g.station_id
+                     WHERE s.rep==%d AND s.sin==%d""" % (rep,sin)
+            sht = self.read_sql(sql)
+
+            if len(sht) != 1:
+                raise ValueError('Number of shots should be 1.')
+
+            rec = pd.DataFrame(columns=['rin', 'rx', 'ry','rz'])
+            for i,rin in enumerate(np.arange(sht.fg.item(),sht.ng.item()+sht.fg.item())):
+                sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
+                         FROM geom g
+                         INNER JOIN recs r ON r.station_id == g.station_id
+                         WHERE r.rin==%d""" % rin
+                tmp = self.read_sql(sql)
+                rec = pd.concat([rec,tmp])
+
+        # return all
+        else:
+            sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
+                     FROM geom g
+                     INNER JOIN shots s ON s.station_id == g.station_id"""
+            sht = self.read_sql(sql)
+
+            rec = pd.DataFrame(columns=['rin', 'rx', 'ry', 'rz'])
+            for j in range(len(sht)):
+                for i, rin in enumerate(np.arange(sht.fg.iloc[j], sht.ng.iloc[j] + sht.fg.iloc[j])):
+                    sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
+                             FROM geom g
+                             INNER JOIN recs r ON r.station_id == g.station_id
+                             WHERE r.rin==%d""" % rin
+                    tmp = self.read_sql(sql)
+                    rec = pd.concat([rec, tmp])
+
+            rec.drop_duplicates(inplace = True, ignore_index=True)
 
         return sht.reset_index(), rec.reset_index()
 
@@ -311,7 +345,7 @@ class SQL:
                  WHERE p.procset=='%s' AND p.wid==%d AND p.sin==%d AND p.rep==%d""" % (procset,wid,sin,rep)
         recs = self.read_sql(sql)
 
-        sql = """SELECT s.sin, s.rep, g.x sx, g.y sy, g.z sz, g.first_geophone fg, g.num_geophones ng
+        sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
                  FROM geom g
                  INNER JOIN shots s ON s.station_id == g.station_id
                  WHERE s.rep==%d AND s.sin==%d""" % (rep, sin)
@@ -438,6 +472,8 @@ class SQL:
                 return vel, kw, freq, FV
             else:
                 return None, None, None, None
+        else:
+            return None, None, None, None
 
     def get_wids(self, sin, rep, procset):
         """return the window ids for a sin/rep pair"""
@@ -559,6 +595,14 @@ class SQL:
         else:
             self.delete_data(tn,params)
             self.to_sql(df, name = tn, if_exists = 'append', index = False)
+
+        # save a copy of the raw data that is not changed once created
+        params_raw = params.copy()
+        params_raw['procset'] = "'%s'" % 'raw'
+        df_raw = df.copy()
+        df_raw['procset'] = 'raw'
+        if self.check_data(tn, params_raw):
+            self.to_sql(df_raw, name=tn, if_exists='append', index=False)
 
     def read_curve(self, params):
         """get data from table FV for a certain wave-field transformation method"""

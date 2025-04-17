@@ -64,9 +64,13 @@ class SeismicStream:
 
         # read the seismic record file and initialize the stream object
         self.channel_nr = channel_nr
-        self._read_data(fname=fname,
-                       channel_nr = self.channel_nr,
-                       pre_trigger=pre_trigger)
+
+        if os.path.isfile(fname):
+            self.read_data(fname=fname,
+                           channel_nr = self.channel_nr,
+                           pre_trigger=pre_trigger)
+        else:
+            raise FileNotFoundError
 
     def _apply_settings(self):
         """apply processing settings from settings DataFrame
@@ -237,7 +241,7 @@ class SeismicStream:
 
         self._st = st_new
 
-    def _read_data(self, fname, channel_nr = 1001, pre_trigger=0):
+    def read_data(self, fname, channel_nr = 1001, pre_trigger=0):
         """
         read a shotfile and extract relevant information
 
@@ -1613,55 +1617,6 @@ class SeismicStream:
             raise NotImplementedError(f'Transformation "{method}" not supported. '
                                       f'Use one of the keys: {keys}')
 
-    # TODO: obsolete, can be removed
-    # def apply_trafo(self,
-    #                  trafo_type = 'phaseshift',
-    #                  do_pick = False,
-    #                  save_dc = False,
-    #                  show=False,
-    #                  **kwargs):
-    #
-    #     keys = ['hdbf','cfdbf','fdbf', 'pfdbf','phaseshift','phase']
-    #
-    #     # apply the transformation based on the chosen method
-    #     if trafo_type.lower() in ['mopa']:
-    #         self._MOPA(**kwargs)
-    #
-    #         # save the dispersion curve
-    #         if save_dc:
-    #             kwargs.setdefault('path2disp', 'dc')
-    #             self._save_dc(**kwargs)
-    #
-    #     else:
-    #         if trafo_type.lower() in ['hdbf','cfdbf']:
-    #             self._fdbf()
-    #         elif trafo_type.lower() in ['fdbf', 'pfdbf']:
-    #             self._fdbf(steering='plane')
-    #         elif trafo_type.lower() in ['phaseshift','phase']:
-    #             self._phaseshift()
-    #         #elif self.trafo_type.lower() in ['fk']:
-    #             # self._fkdc()
-    #             #raise NotImplementedError('Dispersion image based on FK currently not supported.')
-    #         # elif self.trafo_type.lower() in ['lrt']:
-    #         #     #self._lrt()
-    #         #     raise NotImplementedError('Transformation based on LRT currently not supported.')
-    #         else:
-    #             raise NotImplementedError(f'Transformation "{trafo_type}" not supported. '
-    #                                       f'Use one of the keys: {keys}')
-    #
-    #         # pick the dispersion curve
-    #         if do_pick:
-    #             self.dcpicking(pck_mode=self._pck_mode,**kwargs)
-    #
-    #             # save the dispersion curve
-    #             if save_dc:
-    #                 kwargs.setdefault('path2disp','dc')
-    #                 self._save_dc(**kwargs)
-    #
-    #         # show the dispersion image
-    #         if show:
-    #             self._plotDispersionImage(**kwargs)
-
     def update_FV(self, method, vel, kw, freq, FV):
         """update FV data"""
 
@@ -2223,7 +2178,7 @@ class SeismicStream:
 
             trace_select = range(mintrace, maxtrace)
             temp_stream = copy.deepcopy(self)
-            temp_stream._select_traces(trace_select=trace_select)
+            temp_stream._select_traces(trace_indices=trace_select)
 
             receiver = temp_stream.receiver
             offsets = temp_stream._aoffsets(receiver, source)
@@ -2451,6 +2406,9 @@ class SeismicStream:
 
         if amp_scale is None:
             amp_scale = np.mean(np.diff(np.array(self.receiver))) / 2
+
+        if amp_scale == 0:
+            amp_scale = 1
 
         for i, pos in enumerate(self.receiver):
             amps[i] = amps[i] * amp_scale

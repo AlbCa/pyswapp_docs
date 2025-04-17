@@ -11,6 +11,9 @@ from .curves import CombineCurves
 # TODO: error handling: e.g., when requesting data from database always check whether its empty or not!
 # TODO: dynamic/static plotting (?)
 # TODO: documentation
+# TODO: simplify the use of the procsets?
+# TODO: keep copy of raw dispersion curves before filtering [check]
+# TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
 
 class BaseManager:
     def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
@@ -317,7 +320,13 @@ class BaseManager:
     def _extract(self, stream, pck_mode, sin, rep, procset, wid, **kwargs):
         """extract a dispersion curve and write to database"""
 
-        stream.dcpicking(pck_mode=pck_mode, **kwargs)
+        try:
+            stream.dcpicking(pck_mode=pck_mode, **kwargs)
+        except:
+            warnings.warn('No dispersion image generated prior to dispersion curve extraction. '
+                          'Dispersion curve extraction not possible.')
+            pass
+
         method = stream.trafo_type
         xmid = stream.midpoint
 
@@ -359,13 +368,16 @@ class BaseManager:
         else:
             self._extract(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset, **kwargs)
 
-    def _process_curve(self, attr, params, method = 'method', procset = None, **kwargs):
+    def _process_curve(self, attr, params, method = 'method', procset = None, new_procset = None, **kwargs):
         """apply a process to the dispersion curve data"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_procset_label(procset)
+
+        if (new_procset is None) or (new_procset == 'raw'):
+            new_procset = procset
+        # elif procset != self._procset:
+        #     self.set_procset_label(procset)
 
         curve_data = self._sql.read_curve(params)
 
@@ -385,15 +397,15 @@ class BaseManager:
                 'v': dc.velocity,
                 'err': dc.error}
 
-            self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
+            self._sql.write_curve(dc, params['sin'], params['rep'], new_procset, params['wid'], xmid)
 
     def process_curve(self, attr, procset=None, method='tomo2D', dc_mode=0, use_windows = False, **kwargs):
         """apply a process to a dispersion curve"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_procset_label(procset)
+        # elif procset != self._procset:
+        #     self.set_procset_label(procset)
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
@@ -513,42 +525,46 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        _, recs_all = self._sql.get_geometry(1)
+        _, recs_all = self._sql.get_geometry(sin = '*')
         params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode}
 
         curves = self._sql.read_curve(params)
 
-        xmids = curves['xmid'].unique()
+        if not curves.empty:
 
-        vmin = kwargs.pop('vmin', 200)
-        vmax = kwargs.pop('vmax', 500)
+            xmids = curves['xmid'].unique()
 
-        fmin = curves['frequency'].min()
-        fmax = curves['frequency'].max()
+            vmin = kwargs.pop('vmin', 200)
+            vmax = kwargs.pop('vmax', 500)
 
-        title = kwargs.pop('title', '')
+            fmin = curves['frequency'].min()
+            fmax = curves['frequency'].max()
 
-        fig, ax = plt.subplots()
-        for xmid in xmids:
-            params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
-                      'xmid': xmid}
-            sub = self._sql.read_curve(params)
+            title = kwargs.pop('title', '')
 
-            dc = DispersionCurve()
-            dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
+            fig, ax = plt.subplots()
+            for xmid in xmids:
+                params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
+                          'xmid': xmid}
+                sub = self._sql.read_curve(params)
 
-            dc.plotColumn(axes=ax,
-                          xmid=xmid,
-                          vmin=vmin, vmax=vmax,
-                          cmap=cmap, y_value='f',
-                          width=0.5, **kwargs)
+                dc = DispersionCurve()
+                dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
 
-        plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
-        ax.set_xlim([recs_all['rx'].iloc[0], recs_all['rx'].iloc[-1]])
-        ax.set_ylim([fmin, fmax])
+                dc.plotColumn(axes=ax,
+                              xmid=xmid,
+                              vmin=vmin, vmax=vmax,
+                              cmap=cmap, y_value='f',
+                              width=0.5, **kwargs)
 
-        ax.set_title(title)
-        plt.show()
+            plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
+            ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
+            ax.set_ylim([fmin, fmax])
+
+            ax.set_title(title)
+            plt.show()
+        else:
+            warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
 
 class MASW2DManager(BaseManager):
     def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
@@ -722,7 +738,7 @@ class MASW2DManager(BaseManager):
             print(f'{np.round(endtime - starttime, 2)} s')
 
     def plot_curves(self, procset = None, method = 'phaseshift',
-                       dc_mode = 0, apply_to = 'all', use_windows=False):
+                       dc_mode = 0, apply_to = 'all', use_windows=False,**kwargs):
         """process the dispersion curves"""
 
         # Apply process to current selection only
@@ -730,7 +746,7 @@ class MASW2DManager(BaseManager):
             if self.current_stream is None:
                 self.select_data(inplace = True, verbose=False)
 
-            self.plot_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows)
+            self.plot_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
         # Apply process to all data sets
         elif apply_to == 'all':
@@ -739,7 +755,7 @@ class MASW2DManager(BaseManager):
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
                     self.plot_curve(procset=procset, method=method,
-                                       dc_mode=dc_mode, use_windows=use_windows)
+                                       dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
     def save_curves(self, procset = None, method = 'phaseshift',
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
@@ -818,7 +834,7 @@ class MASW2DManager(BaseManager):
             for sin in self.data.keys():
                 for rep in self.data[sin].keys():
 
-                    sys.stdout.write(f'\rMoving window along to (SIN,REP) = ({sin}, {rep}) ..... ')
+                    sys.stdout.write(f'\rMoving window along (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
                     current_stream = self.select_data(sin=sin, rep=rep, inplace=False, verbose=False)

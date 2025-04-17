@@ -249,6 +249,11 @@ class DispersionCurve:
             curve_new.init_data(freq=data['f'], vel=data['vr'], err=data['err'])
             return curve_new
 
+    def filter(self, pmin=None, pmax=None, param = 'f', inplace = False):
+        """remove points outside of [pmin,pmax]"""
+        self.markInvalid(pmin,pmax,param)
+        return self.dropInvalid(inplace)
+
     def save(self, prjdir, pre, format, parkseis_params=None):
         """save dispersion curve data to file"""
 
