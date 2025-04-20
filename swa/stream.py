@@ -2,6 +2,7 @@
 import copy
 import os.path
 from collections import OrderedDict
+import numbers
 
 from scipy import signal, special
 from scipy import interpolate
@@ -63,9 +64,13 @@ class SeismicStream:
 
         # read the seismic record file and initialize the stream object
         self.channel_nr = channel_nr
-        self._read_data(fname=fname,
-                       channel_nr = self.channel_nr,
-                       pre_trigger=pre_trigger)
+
+        if os.path.isfile(fname):
+            self.read_data(fname=fname,
+                           channel_nr = self.channel_nr,
+                           pre_trigger=pre_trigger)
+        else:
+            raise FileNotFoundError
 
     def _apply_settings(self):
         """apply processing settings from settings DataFrame
@@ -236,7 +241,7 @@ class SeismicStream:
 
         self._st = st_new
 
-    def _read_data(self, fname, channel_nr = 1001, pre_trigger=0):
+    def read_data(self, fname, channel_nr = 1001, pre_trigger=0):
         """
         read a shotfile and extract relevant information
 
@@ -514,17 +519,49 @@ class SeismicStream:
             st = self._pst.copy()
         return st
 
-    def _print_stats(self):
+    def print_stats(self, which = 'stream'):
         """print stream information"""
 
-        if self._pst is None:
-            for trace in self._st:
-                print("#### RAW DATA STATS ####")
-                print(trace.stats)
-        else:
-            for trace in self._pst:
-                print("#### PROC DATA STATS ####")
-                print(trace.stats)
+        def pretty_print(header, data):
+            row_format = "{:>15}" * (len(data) + 1)
+            print(row_format.format("", *header))
+            print(row_format.format("", *data))
+
+        def dataList(st):
+            receiver = self._receiver(st)  # receiver positions
+            midpoint = self._midpoint(receiver)  # receiver spread midpoint
+            dx_list = self._dx(receiver)  # receiver separation
+            dx = np.median(abs(dx_list))  # median receiver separation
+            data = [str(st[0].stats.delta),
+                    str(st[0].stats.sampling_rate),
+                    str(self.delay),
+                    str(st[0].stats.npts),
+                    str(len(receiver)),
+                    str(dx),
+                    str(midpoint)]
+            return data
+
+        columns = ['dt (s)', 'dt (Hz)', 'delay (s)', 'npts', 'nrec', 'dx', 'midpoint']
+
+        if (which == 'stream') or (which == 'both'):
+            print("#### RAW STREAM STATS ####")
+            data = dataList(self._st)
+            pretty_print(columns,data)
+
+            if self._pst is not None:
+                print("#### PROC STREAM STATS ####")
+                data = dataList(self._pst)
+                pretty_print(columns, data)
+
+        if (which == 'trace') or (which == 'both'):
+            if self._pst is None:
+                for trace in self._st:
+                    print("#### RAW DATA STATS ####")
+                    print(trace.stats)
+            else:
+                for trace in self._pst:
+                    print("#### PROC DATA STATS ####")
+                    print(trace.stats)
 
     def _save_stream(self, fot, pre):
         """save stream in .mseed file format"""
@@ -640,6 +677,19 @@ class SeismicStream:
 
         self._pst = st_proc
 
+    def resample(self, sampling_rate, window='hann', no_filter=True, strict_length=False):
+        """resample data in all traces using the method from obspy method"""
+
+        if self._pst is None:
+            st_proc = self._st.copy()
+        else:
+            st_proc = self._pst.copy()
+
+        st_proc.resample(sampling_rate, window, no_filter, strict_length)
+        self.dt = 1/sampling_rate  # sampling interval in s
+        self.sampling_rate = sampling_rate # sampling rate
+        self._pst = st_proc # update stream
+
     def _detrend_signal(self, amps):
         """remove linear trend"""
 
@@ -714,8 +764,6 @@ class SeismicStream:
     def trim(self, by, **kwargs):
         """non interactive time or receiver based trimming of the trace data"""
 
-        trace_select = kwargs.setdefault('ids',np.arange(len(self.receiver)))
-
         if by == 'time':
             min = kwargs.setdefault('min', 0)
             max = kwargs.setdefault('max', 0)
@@ -731,10 +779,12 @@ class SeismicStream:
             xmid = kwargs.setdefault('xmid', self.midpoint)
             nwin = kwargs.setdefault('nwin', len(self.receiver))
             self._trim_by_trace_window(nwin, xmid)
-        elif by == 'index':
-            self._select_traces(trace_select)
+        elif by == 'select':
+            trace_indices = kwargs.setdefault('ids', np.arange(len(self.receiver)))
+            self._select_traces(trace_indices)
         elif by == 'remove':
-            self._remove_trace(trace_select)
+            trace_indices = kwargs.setdefault('ids', [])
+            self._remove_trace(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -746,11 +796,15 @@ class SeismicStream:
         else:
             st_proc = self._pst.copy()
 
-        for t, trace in enumerate(st_proc.traces):
-            trace.trim(start_time, end_time)
+        if isinstance(start_time, numbers.Number) and isinstance(end_time, numbers.Number):
+            for t, trace in enumerate(st_proc.traces):
+                trace.trim(start_time, end_time)
 
-        self._pst = st_proc
-        self._update_params_from_stream(st_proc)
+            self._pst = st_proc
+            self._update_params_from_stream(st_proc)
+        else:
+            warnings.warn(f'Start and end time must be numeric not {type(start_time), type(end_time)}. '
+                          f'No process applied.')
 
     def trim_by_offset(self, min_offset, max_offset):
         """cut traces outside of the offsets limits"""
@@ -760,25 +814,28 @@ class SeismicStream:
         else:
             st_proc = self._pst.copy()
 
-        receiver = self.receiver
-        source = self.source
-        offset = receiver - source
+        if isinstance(min_offset, numbers.Number) and isinstance(max_offset, numbers.Number):
+            receiver = self.receiver
+            source = self.source
+            offset = receiver - source
 
-        oids = np.argwhere((offset >= min_offset) & (offset <= max_offset))[:, 0]
+            oids = np.argwhere((offset >= min_offset) & (offset <= max_offset))[:, 0]
 
-        st_new = obspy.Stream()
-        for i in oids:
-            st_new.append(st_proc[i])
+            st_new = obspy.Stream()
+            for i in oids:
+                st_new.append(st_proc[i])
 
-        if len(st_new) > 0:
-            # update
-            self._pst = st_new
-            self._update_params_from_stream(st_new)
-            return oids
+            if len(st_new) > 0:
+                # update
+                self._pst = st_new
+                self._update_params_from_stream(st_new)
+                return oids
+            else:
+                warnings.warn('Min and max offset out of bounds. No process applied.')
+                return []
         else:
-            #print('No process applied. Min and max offset out of bounds.')
-            return []
-
+            warnings.warn(f'Min and max offset must be numeric not {type(min_offset), type(max_offset)}. '
+                          f'No process applied.')
 
     def _trim_by_receiver_separation(self,sep):
         """select channels with specified geophone separation"""
@@ -788,28 +845,34 @@ class SeismicStream:
         else:
             st_proc = self._pst.copy()
 
-        receiver = self.receiver
-        unique_sep = np.unique(self.dx_list)
+        if isinstance(sep, numbers.Number):
 
-        # in case of equidistant geophone separation
-        if len(unique_sep) == 1:
-            if sep % self.dx == 0:
-                step = int(sep/self.dx)
-            else:
-                step = round(sep / self.dx)
+            receiver = self.receiver
+            unique_sep = np.unique(self.dx_list)
 
-            st_new = obspy.Stream()
-            for trace in st_proc[::step]:
-                st_new.append(trace)
+            # in case of equidistant geophone separation
+            if len(unique_sep) == 1:
+                if sep % self.dx == 0:
+                    step = int(sep/self.dx)
+                else:
+                    step = round(sep / self.dx)
 
-            # update
-            self._pst = st_new
-            self._update_params_from_stream(st_new)
+                st_new = obspy.Stream()
+                for trace in st_proc[::step]:
+                    st_new.append(trace)
+
+                # update
+                self._pst = st_new
+                self._update_params_from_stream(st_new)
+        else:
+            warnings.warn(f'Separation must be numeric not {type(sep)}. '
+                          f'No process applied.')
 
     def _trim_by_trace_window(self, nwin, xmid):
         """select traces around xmid and window size"""
 
         nchannels = self.nchannels
+        nwin = int(nwin)
 
         if nwin <= nchannels:
             if (nwin % 2) == 0:
@@ -827,8 +890,14 @@ class SeismicStream:
         else:
             return None
 
-    def _select_traces(self, trace_select):
+    def _select_traces(self, trace_indices):
         """select a subset of a stream based on trace indices"""
+
+        if not isinstance(trace_indices, Iterable):
+            if isinstance(trace_indices, int):
+                trace_indices = [trace_indices]
+            else:
+                raise ValueError(f'Indices should be int, list, or array-like, not {type(trace_indices)}')
 
         receiver = self.receiver
 
@@ -840,7 +909,7 @@ class SeismicStream:
         st_new = obspy.Stream()
         receiver_subset = []
         for i, trace in enumerate(st_proc):
-            if i in trace_select:
+            if i in trace_indices:
                 st_new.append(trace)
                 receiver_subset.append(receiver[i])
 
@@ -850,6 +919,12 @@ class SeismicStream:
 
     def _remove_trace(self, trace_indices):
         """remove a trace based on an index"""
+
+        if not isinstance(trace_indices, Iterable):
+            if isinstance(trace_indices, int):
+                trace_indices = [trace_indices]
+            else:
+                raise ValueError(f'Indices should be int, list, or array-like, not {type(trace_indices)}')
 
         if self._pst is None:
             st_proc = self._st.copy()
@@ -882,6 +957,13 @@ class SeismicStream:
             vel = kwargs.setdefault('vel', None)
             bulk_shift = kwargs.setdefault('bulk_shift', 0)
             self._lmo(vel, bulk_shift)
+        elif by == 'mute':
+            self._mute(**kwargs)
+        elif by == 'mute_trace':
+            trace_indices = kwargs.setdefault('ids', [])
+            self._mute_traces(trace_indices)
+        elif by == 'resample':
+            self.resample(**kwargs)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -917,6 +999,27 @@ class SeismicStream:
 
         self._pst = st_proc
 
+    def _mute_traces(self, trace_indices):
+        """set a trace to 0"""
+
+        if not isinstance(trace_indices, Iterable):
+            if isinstance(trace_indices, int):
+                trace_indices = [trace_indices]
+            else:
+                raise ValueError(f'Indices should be int, list, or array-like, not {type(trace_indices)}')
+
+        if self._pst is None:
+            st_proc = self._st.copy()
+        else:
+            st_proc = self._pst.copy()
+
+        for i, trace in enumerate(st_proc):
+            if i in trace_indices:
+                st_proc[i].data *= 0
+
+        # update
+        self._pst = st_proc
+
     def _mute(self, tapering='mild'):
         """
         interactive linear muting
@@ -938,7 +1041,7 @@ class SeismicStream:
 
         while terminate is False:
 
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(7, 5))
             self._plotSeismogram(axes=ax, amp_scale=1)
 
             text = '\n'.join((
@@ -996,7 +1099,6 @@ class SeismicStream:
         key :  str, which type of mute to apply ('t'-top, 'b'-bottom)
         kwargs :
         """
-
 
         # tapering type and settings
         taper_type = kwargs.pop('taper_type', 'tukey')
@@ -1514,55 +1616,6 @@ class SeismicStream:
         else:
             raise NotImplementedError(f'Transformation "{method}" not supported. '
                                       f'Use one of the keys: {keys}')
-
-    # TODO: obsolete, can be removed
-    # def apply_trafo(self,
-    #                  trafo_type = 'phaseshift',
-    #                  do_pick = False,
-    #                  save_dc = False,
-    #                  show=False,
-    #                  **kwargs):
-    #
-    #     keys = ['hdbf','cfdbf','fdbf', 'pfdbf','phaseshift','phase']
-    #
-    #     # apply the transformation based on the chosen method
-    #     if trafo_type.lower() in ['mopa']:
-    #         self._MOPA(**kwargs)
-    #
-    #         # save the dispersion curve
-    #         if save_dc:
-    #             kwargs.setdefault('path2disp', 'dc')
-    #             self._save_dc(**kwargs)
-    #
-    #     else:
-    #         if trafo_type.lower() in ['hdbf','cfdbf']:
-    #             self._fdbf()
-    #         elif trafo_type.lower() in ['fdbf', 'pfdbf']:
-    #             self._fdbf(steering='plane')
-    #         elif trafo_type.lower() in ['phaseshift','phase']:
-    #             self._phaseshift()
-    #         #elif self.trafo_type.lower() in ['fk']:
-    #             # self._fkdc()
-    #             #raise NotImplementedError('Dispersion image based on FK currently not supported.')
-    #         # elif self.trafo_type.lower() in ['lrt']:
-    #         #     #self._lrt()
-    #         #     raise NotImplementedError('Transformation based on LRT currently not supported.')
-    #         else:
-    #             raise NotImplementedError(f'Transformation "{trafo_type}" not supported. '
-    #                                       f'Use one of the keys: {keys}')
-    #
-    #         # pick the dispersion curve
-    #         if do_pick:
-    #             self.dcpicking(pck_mode=self._pck_mode,**kwargs)
-    #
-    #             # save the dispersion curve
-    #             if save_dc:
-    #                 kwargs.setdefault('path2disp','dc')
-    #                 self._save_dc(**kwargs)
-    #
-    #         # show the dispersion image
-    #         if show:
-    #             self._plotDispersionImage(**kwargs)
 
     def update_FV(self, method, vel, kw, freq, FV):
         """update FV data"""
@@ -2125,7 +2178,7 @@ class SeismicStream:
 
             trace_select = range(mintrace, maxtrace)
             temp_stream = copy.deepcopy(self)
-            temp_stream._select_traces(trace_select=trace_select)
+            temp_stream._select_traces(trace_indices=trace_select)
 
             receiver = temp_stream.receiver
             offsets = temp_stream._aoffsets(receiver, source)
@@ -2233,14 +2286,14 @@ class SeismicStream:
         """normalize power spectrum"""
 
         norm_power = np.zeros_like(power)
-        global_max = np.max(np.abs(power))
+        global_max = np.nanmax(np.abs(power))
 
         for i in range(norm_power.shape[1]):
             pow = power[:,i]
             if self.use_local_max_power:
-                local_max = np.max(np.abs(pow))
+                local_max = np.nanmax(np.abs(pow))
                 if local_max != 0:
-                    pow = pow / np.max(np.abs(pow))
+                    pow = pow / np.nanmax(np.abs(pow))
             else:
                 pow = pow/global_max
             norm_power[:,i] = pow
@@ -2353,6 +2406,9 @@ class SeismicStream:
 
         if amp_scale is None:
             amp_scale = np.mean(np.diff(np.array(self.receiver))) / 2
+
+        if amp_scale == 0:
+            amp_scale = 1
 
         for i, pos in enumerate(self.receiver):
             amps[i] = amps[i] * amp_scale
@@ -2833,10 +2889,12 @@ class SeismicStream:
         labelx = "frequency (Hz)"
 
         # plot dispersion image and dispersion curves
+        contours = np.linspace(limits[0], limits[1], 21)
+
         img = ax.contourf(datx,
                            daty,
                            dispersive_energy.real,
-                           np.linspace(limits[0], limits[1], 21),
+                           contours,
                            #extend='both',
                            cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
 

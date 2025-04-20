@@ -11,6 +11,9 @@ from .curves import CombineCurves
 # TODO: error handling: e.g., when requesting data from database always check whether its empty or not!
 # TODO: dynamic/static plotting (?)
 # TODO: documentation
+# TODO: simplify the use of the procsets?
+# TODO: keep copy of raw dispersion curves before filtering [check]
+# TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
 
 class BaseManager:
     def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
@@ -198,6 +201,12 @@ class BaseManager:
         print(f' {np.round(endtime - starttime, 2)} s')
         print(f'Read {nfiles} files and applied geometry and settings.')
 
+    def print_stats(self, which = 'stream'):
+        """print stream information"""
+
+        stream = self.current_stream
+        stream.print_stats(which)
+
     def _write_data(self, data, sin, rep, procset, wid=-1):
         """write processed data to database"""
         self._sql.write_data(data, sin, rep, procset, wid)
@@ -215,15 +224,8 @@ class BaseManager:
     def _get_FV(self, sin, rep, procset, wid=-1, method='phaseshift'):
         """get FV data from database"""
 
-        FV, freq = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
-        if not FV.empty:
-            vel = FV.velocity.values
-            kw = FV.wavenumber.values
-            FV = FV.iloc[:, 7:].astype(complex).values
-
-            return vel, kw, freq, FV
-        else:
-            return None, None, None, None
+        vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
+        return vel, kw, freq, FV
 
     def _set_data(self, data, sin, rep, procset, wid=-1):
         """set processed data from database to current stream"""
@@ -255,7 +257,7 @@ class BaseManager:
                 if inplace:
                     self.current_stream = selection
                     if verbose:
-                        print(f'Currently selected data: (SIN,REP) = {self.selected_ids}')
+                        print(f'Currently selected data: (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})')
                 return selection
             else:
                 raise KeyError(f'The key rep = {rep} does not exist for sin = {sin}.')
@@ -318,7 +320,13 @@ class BaseManager:
     def _extract(self, stream, pck_mode, sin, rep, procset, wid, **kwargs):
         """extract a dispersion curve and write to database"""
 
-        stream.dcpicking(pck_mode=pck_mode, **kwargs)
+        try:
+            stream.dcpicking(pck_mode=pck_mode, **kwargs)
+        except:
+            warnings.warn('No dispersion image generated prior to dispersion curve extraction. '
+                          'Dispersion curve extraction not possible.')
+            pass
+
         method = stream.trafo_type
         xmid = stream.midpoint
 
@@ -360,13 +368,16 @@ class BaseManager:
         else:
             self._extract(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset, **kwargs)
 
-    def _process_curve(self, attr, params, method = 'method', procset = None, **kwargs):
+    def _process_curve(self, attr, params, method = 'method', procset = None, new_procset = None, **kwargs):
         """apply a process to the dispersion curve data"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_procset_label(procset)
+
+        if (new_procset is None) or (new_procset == 'raw'):
+            new_procset = procset
+        # elif procset != self._procset:
+        #     self.set_procset_label(procset)
 
         curve_data = self._sql.read_curve(params)
 
@@ -375,25 +386,26 @@ class BaseManager:
         func = getattr(dc, attr)
         dc = func(**kwargs)
 
-        xmid = curve_data['xmid'].unique().item()
+        xmids = curve_data['xmid'].unique()#item()
 
-        dc = {
-            'xmid': xmid,
-            'method': method,
-            'dc_mode': params['dc_mode'],
-            'f': dc.frequency,
-            'v': dc.velocity,
-            'err': dc.error}
+        for xmid in xmids:
+            dc = {
+                'xmid': xmid,
+                'method': method,
+                'dc_mode': params['dc_mode'],
+                'f': dc.frequency,
+                'v': dc.velocity,
+                'err': dc.error}
 
-        self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
+            self._sql.write_curve(dc, params['sin'], params['rep'], new_procset, params['wid'], xmid)
 
     def process_curve(self, attr, procset=None, method='tomo2D', dc_mode=0, use_windows = False, **kwargs):
         """apply a process to a dispersion curve"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_procset_label(procset)
+        # elif procset != self._procset:
+        #     self.set_procset_label(procset)
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
@@ -475,7 +487,7 @@ class BaseManager:
                 self._set_data(tmp, sin, rep, procset, wid)
 
                 if attr in ['dispersionImage','dispersionImageComposite']:
-                    self._set_FV(tmp, sin, rep, procset=procset, method=method)
+                    self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
 
                 tmp.plot(attr, **kwargs)
         else:
@@ -513,42 +525,46 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        _, recs_all = self._sql.get_geometry(1)
+        _, recs_all = self._sql.get_geometry(sin = '*')
         params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode}
 
         curves = self._sql.read_curve(params)
 
-        xmids = curves['xmid'].unique()
+        if not curves.empty:
 
-        vmin = kwargs.pop('vmin', 200)
-        vmax = kwargs.pop('vmax', 500)
+            xmids = curves['xmid'].unique()
 
-        fmin = curves['frequency'].min()
-        fmax = curves['frequency'].max()
+            vmin = kwargs.pop('vmin', 200)
+            vmax = kwargs.pop('vmax', 500)
 
-        title = kwargs.pop('title', '')
+            fmin = curves['frequency'].min()
+            fmax = curves['frequency'].max()
 
-        fig, ax = plt.subplots()
-        for xmid in xmids:
-            params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
-                      'xmid': xmid}
-            sub = self._sql.read_curve(params)
+            title = kwargs.pop('title', '')
 
-            dc = DispersionCurve()
-            dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
+            fig, ax = plt.subplots()
+            for xmid in xmids:
+                params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
+                          'xmid': xmid}
+                sub = self._sql.read_curve(params)
 
-            dc.plotColumn(axes=ax,
-                          xmid=xmid,
-                          vmin=vmin, vmax=vmax,
-                          cmap=cmap, y_value='f',
-                          width=0.5, **kwargs)
+                dc = DispersionCurve()
+                dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
 
-        plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
-        ax.set_xlim([recs_all['rx'].iloc[0], recs_all['rx'].iloc[-1]])
-        ax.set_ylim([fmin, fmax])
+                dc.plotColumn(axes=ax,
+                              xmid=xmid,
+                              vmin=vmin, vmax=vmax,
+                              cmap=cmap, y_value='f',
+                              width=0.5, **kwargs)
 
-        ax.set_title(title)
-        plt.show()
+            plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
+            ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
+            ax.set_ylim([fmin, fmax])
+
+            ax.set_title(title)
+            plt.show()
+        else:
+            warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
 
 class MASW2DManager(BaseManager):
     def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
@@ -597,7 +613,7 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr}to (SIN,REP) = {self.selected_ids} ..... ', end='')
+            print(f'Applying {attr} to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
             self.preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
 
@@ -630,7 +646,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr} transformation to (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Applying {attr} transformation to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.transform(attr,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
@@ -661,7 +678,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Dispersion curve extraction of (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Dispersion curve extraction of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, **kwargs)
 
             endtime = time.time()
@@ -694,7 +712,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {attr} to dispersion curve of (SIN,REP) = {self.selected_ids} ..... ', end = '')
+            print(f'Applying {attr} to dispersion curve of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' ..... ', end = '')
             self.process_curve(attr=attr, procset=procset, method=method,
                                dc_mode=dc_mode, use_windows = use_windows, **kwargs)
             endtime = time.time()
@@ -719,7 +738,7 @@ class MASW2DManager(BaseManager):
             print(f'{np.round(endtime - starttime, 2)} s')
 
     def plot_curves(self, procset = None, method = 'phaseshift',
-                       dc_mode = 0, apply_to = 'all', use_windows=False):
+                       dc_mode = 0, apply_to = 'all', use_windows=False,**kwargs):
         """process the dispersion curves"""
 
         # Apply process to current selection only
@@ -727,7 +746,7 @@ class MASW2DManager(BaseManager):
             if self.current_stream is None:
                 self.select_data(inplace = True, verbose=False)
 
-            self.plot_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows)
+            self.plot_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
         # Apply process to all data sets
         elif apply_to == 'all':
@@ -736,7 +755,7 @@ class MASW2DManager(BaseManager):
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
                     self.plot_curve(procset=procset, method=method,
-                                       dc_mode=dc_mode, use_windows=use_windows)
+                                       dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
     def save_curves(self, procset = None, method = 'phaseshift',
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
@@ -754,7 +773,8 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Save dispersion curves corresponding to (SIN,REP) = {self.selected_ids} to file ..... ', end = '')
+            print(f'Save dispersion curves corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' to file ..... ', end = '')
             xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
             xmids += xmid
             endtime = time.time()
@@ -770,7 +790,7 @@ class MASW2DManager(BaseManager):
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
                     sys.stdout.write(f'\rSave dispersion curves corresponding to (SIN,REP) = '
-                          f'{self.selected_ids} to file ..... ')
+                          f'({sin}, {rep}) to file ..... ')
                     sys.stdout.flush()
 
                     xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
@@ -797,7 +817,7 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Moving window along (SIN,REP) = {self.selected_ids} ..... ', end='')
+            print(f'Moving window along (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
             windows = self.current_stream.moving_window(**kwargs)
 
@@ -814,7 +834,7 @@ class MASW2DManager(BaseManager):
             for sin in self.data.keys():
                 for rep in self.data[sin].keys():
 
-                    sys.stdout.write(f'\rMoving window along to (SIN,REP) = ({sin}, {rep}) ..... ')
+                    sys.stdout.write(f'\rMoving window along (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
                     current_stream = self.select_data(sin=sin, rep=rep, inplace=False, verbose=False)
@@ -854,7 +874,7 @@ class MASW2DManager(BaseManager):
                 wids = self._sql.get_wids(sin, rep, procset)
                 if use_windows:
                     for wid in wids:
-                        params['sin'] =  sin
+                        params['sin'] = sin
                         params['rep'] = rep
                         params['wid'] = wid
 
@@ -862,7 +882,9 @@ class MASW2DManager(BaseManager):
 
                         dc = DispersionCurve()
                         dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                        self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
+
+                        for xmid in curve_data['xmid'].unique():
+                            self.CC.append(dc, xmid, source=None, color=color)
 
                 else:
                     params['sin'] = sin
@@ -874,7 +896,6 @@ class MASW2DManager(BaseManager):
                     dc = DispersionCurve()
                     dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
                     self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
-
 
     def combine(self, procset = None, dc_mode = 0, use_windows=False, **kwargs):
         """combine dispersion curves with same receiver spread location"""
@@ -975,6 +996,7 @@ class MASW2DManager(BaseManager):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
             self._save_curve(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
 
 class Tomo2DManager(BaseManager):
     def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
@@ -1099,8 +1121,8 @@ class Tomo2DManager(BaseManager):
                     tmp = copy.deepcopy(current_stream)
                     self._set_data(tmp, sin, rep, procset, wid)
 
-                    cur_pd, cur_fids, cur_freq = current_stream.compute_phasediffs()
-                    cur_rec = current_stream.receiver
+                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs()
+                    cur_rec = tmp.receiver
 
                     cur_sht_geom, cur_rec_geom = self._sql.get_geometry(sin, rep)
                     rin = np.zeros(len(cur_rec) - 1)
