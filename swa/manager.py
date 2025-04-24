@@ -2,18 +2,27 @@ import sys
 import time
 import copy
 
+import matplotlib.pyplot as plt
+
 from .utils import *
 from .stream import SeismicStream
 from .curve import DispersionCurve
 from .curves import CombineCurves
 
 # TODO: test on field data
-# TODO: error handling: e.g., when requesting data from database always check whether its empty or not!
-# TODO: dynamic/static plotting (?)
-# TODO: documentation
-# TODO: simplify the use of the procsets?
+# TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
+# TODO: dynamic/static plotting!!!
+# TODO: documentation!!!
 # TODO: keep copy of raw dispersion curves before filtering [check]
+# TODO: CURVE & PROCSET
+# TODO: simplify the use of the procsets
+# TODO: load/save curves: add function to load a curve set!!
 # TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
+# TODO: read geometry with general file name!
+# TODO: change settings midprocessing
+# TODO: better way to work with windowing data??
+# TODO: plotting issues when plotting windowing data as curve
+# TODO: flip polarity
 
 class BaseManager:
     def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
@@ -161,10 +170,11 @@ class BaseManager:
         """Return the file path corresponding to the indices sin and rep as string"""
         if self.fileList is not None:
             sn = self._sql.get_shotfile(sin, rep).shots.item()
-            for i, fn in enumerate(self.fileList):
+            for i, fp in enumerate(self.fileList):
+                path, fn = os.path.split(fp)
                 sfn = re.findall(r'\d+', fn.replace(self.ext, ''))[0]
                 if str(sn) == str(sfn):
-                    return fn
+                    return os.path.join(path,fn)
         return None
 
     def _read_data(self):
@@ -196,6 +206,8 @@ class BaseManager:
                 if sin in self.data.keys():
                     if rep in self.data[sin].keys():
                         self._write_data(self.data[sin][rep], sin, rep, 'raw')
+            else:
+                raise FileNotFoundError
 
         endtime = time.time()
         print(f' {np.round(endtime - starttime, 2)} s')
@@ -409,6 +421,8 @@ class BaseManager:
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
+        data = self.data
+        stream = data[sin][rep]
 
         wids = self._sql.get_wids(sin, rep, procset)
         if use_windows:
@@ -416,10 +430,31 @@ class BaseManager:
 
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                           'sin': sin, 'rep': rep, 'wid': wid}
+
+                tmp = copy.deepcopy(stream)
+                self._set_data(tmp, sin, rep, procset, wid)
+                receiver = tmp.receiver
+                source = tmp.source
+                offsets = receiver - source
+                kwargs['offsets'] = offsets
+                kwargs['nchannels'] = len(receiver)
+                kwargs['dx'] = abs(receiver[0]-receiver[1])
+
                 self._process_curve(attr, params, method, procset=procset, **kwargs)
         else:
             params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                       'sin': sin, 'rep': rep, 'wid': -1}
+
+            if attr == 'estimate_error':
+
+                # add offsets to kwargs
+                receiver = stream.receiver
+                source = stream.source
+                offsets = receiver - source
+                kwargs['offsets'] = offsets
+                kwargs['nchannels'] = len(receiver)
+                kwargs['dx'] = abs(receiver[0] - receiver[1])
+
             self._process_curve(attr, params, method, procset=procset, **kwargs)
 
     def _save_curve(self, path2dc, name, params, format = 'csv', **kwargs):
@@ -490,8 +525,6 @@ class BaseManager:
                     self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
 
                 tmp.plot(attr, **kwargs)
-        else:
-            stream.plot(attr, **kwargs)
 
     def plot_curve(self, procset=None, method='phaseshift', dc_mode=0, use_windows = False, **kwargs):
         """plot a dispersion curve"""
@@ -519,7 +552,7 @@ class BaseManager:
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
             dc.plot(**kwargs)
 
-    def plot_pseusodsection(self, procset=None, method='tomo2D', dc_mode=0, cmap='viridis', **kwargs):
+    def plot_pseusodsection(self, procset=None, method='tomo2D', dc_mode=0, cmap='jet', axes = None, **kwargs):
         """plot the Rayleigh wave phase velocity pseudosection"""
 
         if procset is None:
@@ -534,15 +567,21 @@ class BaseManager:
 
             xmids = curves['xmid'].unique()
 
-            vmin = kwargs.pop('vmin', 200)
-            vmax = kwargs.pop('vmax', 500)
+            vmin = kwargs.pop('vmin', 300)
+            vmax = kwargs.pop('vmax', 700)
 
             fmin = curves['frequency'].min()
             fmax = curves['frequency'].max()
 
             title = kwargs.pop('title', '')
+            outfile = kwargs.pop('outfile', None)
 
-            fig, ax = plt.subplots()
+            if axes is None:
+                fig, ax = plt.subplots()
+            else:
+                ax = axes
+                fig = ax.figure
+
             for xmid in xmids:
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
                           'xmid': xmid}
@@ -555,14 +594,18 @@ class BaseManager:
                               xmid=xmid,
                               vmin=vmin, vmax=vmax,
                               cmap=cmap, y_value='f',
-                              width=0.5, **kwargs)
+                              width=4, **kwargs)
 
             plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
             ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
             ax.set_ylim([fmin, fmax])
 
             ax.set_title(title)
-            plt.show()
+            if outfile:
+                fig.savefig(outfile)
+                plt.close()
+            else:
+                plt.show()
         else:
             warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
 
@@ -1165,7 +1208,7 @@ class Tomo2DManager(BaseManager):
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
-    def run(self, min_offset=3, max_offset=1e6, lam = 1, rel_err = None, procset = None):
+    def run(self, min_offset=3, max_offset=1e6, lam = 1, rel_err = None, procset = None, **kwargs):
         """run the tomographic like approach"""
 
         if procset is None:
@@ -1265,6 +1308,41 @@ class Tomo2DManager(BaseManager):
 
             phi_vel, phi_model = tomo2D_phasediff(lam=lam, f=f, A=A, dphi=dphi, w=w)
             phi_vel_all[:, jj] = phi_vel
+
+            # if kwargs.setdefault('showTomoResults', False):
+            # recs_plot = np.asarray(recs['rx'].iloc[:-1])
+            #
+            #     axes = kwargs.pop('axes', None)
+            #     outfile = kwargs.pop('outfile', None)
+            #
+            #     if axes is None:
+            #         fig, ax = plt.subplots(1,2, figsize=(6, 2))
+            #     else:
+            #         ax = axes
+            #         fig = ax.figure
+            #
+            #     ax[0].plot(dphi,color = 'k', marker = 'o', markersize=5)
+            #     ax[0].plot(phi_model, color = 'r')
+            #     ax[0].set_xlabel("offset (m)")
+            #     ax[0].set_ylabel(f"phase differences (rad)")
+            #     ax[0].grid()
+            #
+            #     ax[1].scatter(recs_plot,phi_vel, s=15, c='darkgrey', marker ='o',
+            #               edgecolor='k', linewidth=0.2, zorder=-2, label = f'f = {round(f)} Hz')
+            #     ax[1].set_xlim([np.min(recs_plot),np.max(recs_plot)])
+            #     ax[1].set_ylim([10,600])
+            #     ax[1].set_ylabel(f"phase velocity (m/s)")
+            #     ax[1].set_xlabel("offset (m)")
+            #     ax[1].legend(loc = 'lower right', frameon=True)
+            #     ax[1].grid()
+            #
+            #     if outfile:
+            #         parent = os.path.dirname(outfile)
+            #         safe_makedirs(parent)
+            #         fig.savefig(outfile)
+            #         plt.close()
+            #     else:
+            #         plt.show()
 
         # add dispersion curves to database
         xmids = recs['rx'].iloc[:-1].values + dx / 2

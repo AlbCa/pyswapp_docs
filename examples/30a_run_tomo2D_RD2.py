@@ -1,4 +1,3 @@
-
 import sys
 import os
 nb_dir = os.path.dirname(os.path.abspath("__file__")) # get nb absolute path
@@ -9,19 +8,20 @@ import matplotlib
 matplotlib.use('Qt5Agg')
 
 # %% TOMOGRAPHIC LIKE APPROACH
+
 # directories
 prj_dir = '../data/real_data/Moriago'    # I have changed the relative path to make the script work in the "swa" folder
-path2raw = os.path.join(prj_dir,'ALL')
-path2geom = f'{prj_dir}/geometry_test.csv'
+path2raw = os.path.join(prj_dir,'RIFL1')
+path2geom = f'{prj_dir}/geometry_test_L1.csv'
 ext = '.sg2' # shot file extension
 
 procset = 'tomo2D'  # processing set label
 
 # processing and plotting settings
-settings = create_settings(fmin=5, fmax=40,                  # frequency range
+settings = create_settings(fmin=10, fmax=40,                  # frequency range
                            vmin=100, vmax=1200, velstep=1)     # testing phase velocity range and step
 
-swam = Tomo2DManager(f'{prj_dir}/proc/30a_tomo2D',path2raw=path2raw,path2geom=path2geom, settings=settings)
+swam = Tomo2DManager(f'{prj_dir}/proc/30a_tomo2D_L1',path2raw=path2raw,path2geom=path2geom,settings=settings)
 
 # load data from database based on procset label
 #swam.load_procset('raw')
@@ -56,7 +56,7 @@ for ii in range(len(shots)):
 swam.set_procset_label(procset)
 
 # Retrieve subsets from data corresponding to forward and reverse shots
-swam.prepare_streams(min_offset=15, max_offset=250, min_rec = 12)
+swam.prepare_streams(min_offset=15, max_offset=250, min_rec = 24)
 
 # # Apply preprocessing steps to the data (e.g., FK filtering)
 # FK_kwargs = {'manual': False,  # if manual is True: filter by picking
@@ -64,7 +64,7 @@ swam.prepare_streams(min_offset=15, max_offset=250, min_rec = 12)
 #              'show': False  # show the filtered FK spectrum  
 #               }
 
-swam.preprocess_streams(attr='filter', by = 'FK', fname = 'C:/Users/Ilaria/Documents/GitHub/swa/data/real_data/Moriago/dummy_filter_new2.txt') # **FK_kwargs)
+swam.preprocess_streams(attr='filter', by = 'FK', fname = 'C:/Users/Ilaria/Documents/GitHub/swa/data/real_data/Moriago/dummy_filter_new2.txt')  # manual = 'True') ## **FK_kwargs)
 
 # Compute the phase differences of the processed data
 swam.compute_phasediff()

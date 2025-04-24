@@ -1397,7 +1397,7 @@ class SeismicStream:
 
         # tapering function
         taper_func = getattr(signal.windows, 'hann')
-        taper_len = int(kwargs.pop('taper_length', 5) // df)
+        taper_len = int(kwargs.pop('taper_length', 1) // df)
         taper_win = taper_func(2 * taper_len)
 
         FK_abs_filt = FK_abs.copy()
