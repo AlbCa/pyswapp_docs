@@ -111,7 +111,7 @@ class SQL:
                            names=['x', 'y', 'z',
                           'geophone', 'shots',
                           'first_geophone', 'num_geophones'])
-        geom = geom.astype({'shots':str})
+        geom = geom.astype({'shots':str, 'first_geophone':str,'num_geophones':str})
         geom.insert(0, 'station_id', np.arange(len(geom)) + 1)
 
         shots = pd.DataFrame(geom.loc[geom.shots != '-1', ['station_id','shots']])

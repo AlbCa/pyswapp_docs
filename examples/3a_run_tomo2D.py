@@ -1,10 +1,11 @@
 from swa import *
+from plot_settings import *
 
 # %% TOMOGRAPHIC LIKE APPROACH
 # directories
 prj_dir = '../data/syn_data'
 path2raw = os.path.join(prj_dir,'raw')
-path2geom = f'{prj_dir}/geometry_v2.csv'
+path2geom = f'{prj_dir}/geometry_v2_test.csv'
 ext = '.sgy' # shot file extension
 
 procset = 'tomo2D' # processing set label
@@ -16,36 +17,38 @@ settings = create_settings(fmin=10, fmax=50,                  # frequency range
 swam = Tomo2DManager(f'{prj_dir}/proc/swa_v2/3a_tomo2D',path2raw=path2raw,path2geom=path2geom, settings=settings)
 
 # load data from database based on procset label
-swam.load_procset('raw')
+swam.load_procset('tomo2D')
 
 # set a new procset label where you will store the processed data
 swam.set_procset_label(procset)
 
-# Retrieve subsets from data corresponding to forward and reverse shots
-swam.prepare_streams(min_offset=3, max_offset=1e6)
+# # # Retrieve subsets from data corresponding to forward and reverse shots
+# # swam.prepare_streams(min_offset=3, max_offset=1e6, min_rec = 12)
+#
+# # Apply preprocessing steps to the data (e.g., FK filtering)
+# FK_kwargs = {'manual': True   # if manual is True: filter by picking
+#              # fname=path2fk, # specify a file name to which picks should be saved or,
+#                               # if manual is False, from which FK filter should be imported
+#              # show=False     # show the filtered FK spectrum
+#               }
+# swam.preprocess_streams(attr='filter', by = 'FK', cmap = 'Greys', **FK_kwargs)
 
-# Apply preprocessing steps to the data (e.g., FK filtering)
-FK_kwargs = {'manual': True   # if manual is True: filter by picking
-             # fname=path2fk, # specify a file name to which picks should be saved or,
-                              # if manual is False, from which FK filter should be imported
-             # show=False     # show the filtered FK spectrum
-              }
-swam.preprocess_streams(attr='filter', by = 'FK', **FK_kwargs)
-
-# Compute the phase differences of the processed data
-swam.compute_phasediff()
-
-# Run the tomo2D
-swam.run(lam = 50, min_offset = 10, max_offset = 20, rel_err = 15/100)
+# # Compute the phase differences of the processed data
+# swam.compute_phasediff()
+#
+# # Run the tomo2D
+# swam.run(lam = 200, min_offset = 10, max_offset = 40, rel_err = 15/100)
 
 # Plot the pseudosection
-swam.plot_pseusodsection(method='tomo2D')
+fig,ax = plt.subplots(figsize=(6,2))
+swam.plot_pseusodsection(auto_method = 'tomo2D', cmap='cividis', axes = ax,
+                         outfile = '/home/Natalie/Documents/Projects/GIT/swa/data/syn_data/figures_EGU/Pseudosections/tomo_v2.png')
 
-# Process the dispersion curves
-swam.process_curves(attr = 'smooth')
-
-# Plot the dispersion curves individually
-swam.plot_curves()
-
-# Save the dispersion curves
-swam.save_curves(procset=procset, method='tomo2D', dc_mode=0, format = 'csv')
+# # Process the dispersion curves
+# swam.process_curves(attr = 'smooth')
+#
+# # Plot the dispersion curves individually
+# swam.plot_curves()
+#
+# # Save the dispersion curves
+# swam.save_curves(procset=procset, method='tomo2D', dc_mode=0, format = 'csv')

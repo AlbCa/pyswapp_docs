@@ -1,7 +1,4 @@
-from matplotlib import interactive
-
 from swa import *
-from swa import Tomo2DManager
 
 # %% Combine curves
 # directories
@@ -23,7 +20,7 @@ swam.set_procset_label(procset)
 swam.load_procset(procset)
 
 # set the data for the combination process and sort based on receiver spread mid point
-swam.prepare_CC(method = 'phaseshift_max', use_windows=True)
+swam.prepare_CC(method = 'MOPA', use_windows=True)
 
 # run some processes from the CC class, e.g., manual filtering of the sorted dispersion curves
 swam.CC.filter_all()
@@ -35,10 +32,10 @@ CC_kwargs = {'mode' : 0,    # mode 0 = binning; mode 1 = resampling to same freq
             'ylim' : [50,400],# ylimit for plotting
             'save':False,     # save the combined dc
             'show': True}      # show the combined dc
-swam.combine(method = 'phaseshift_max', use_windows=True, **CC_kwargs)
+swam.combine(method = 'MOPA', use_windows=True, **CC_kwargs)
 
 # process the dispersion curves if necessary
-swam.process_CC(attr='smooth', procset=None, method='phaseshift')
+swam.process_CC(attr='smooth', method='MOPA')
 
 # save the dispersion curves to a file
-swam.save_CC(procset=None, method='phaseshift')
+swam.save_CC(method='MOPA')

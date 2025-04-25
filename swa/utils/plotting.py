@@ -132,13 +132,28 @@ def plot_vphase(ax, val, f=None, lam=None, xmid=0, vmin=100, vmax=1000, y_value 
     return ax, cmap
 
 
-def plot_colorBar(ax,vmin,vmax,**kwargs):
+def plot_colorBar(ax,vmin,vmax, orientation='vertical', size=0.2, pad=None,**kwargs):
     """create and plot a colorbar"""
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    divider = make_axes_locatable(ax)
+    if orientation == 'horizontal':
+        if pad is None:
+            pad = 0.5
+        cax = divider.append_axes("bottom", size=size, pad=pad)
+
+    else:
+        if pad is None:
+            pad = 0.1
+        cax = divider.append_axes("right", size=size, pad=pad)
 
     cmap = kwargs.setdefault('cmap', 'viridis')
     label = kwargs.setdefault('label','vr (m/s)')
 
     norm = plt.Normalize(vmin, vmax)
     sm = ScalarMappable(norm=norm, cmap=mpl.colormaps[cmap])
-    cbMt = plt.colorbar(sm, ax=ax, **kwargs)
-    cbMt.set_label(label)
+    fig = ax.figure
+    cbar = fig.colorbar(sm, cax=cax, orientation = orientation, **kwargs)
+    cbar.set_label(label)
+
+    return cbar

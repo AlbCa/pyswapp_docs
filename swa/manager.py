@@ -2,18 +2,29 @@ import sys
 import time
 import copy
 
+import matplotlib.pyplot as plt
+
 from .utils import *
 from .stream import SeismicStream
 from .curve import DispersionCurve
 from .curves import CombineCurves
 
 # TODO: test on field data
-# TODO: error handling: e.g., when requesting data from database always check whether its empty or not!
-# TODO: dynamic/static plotting (?)
-# TODO: documentation
-# TODO: simplify the use of the procsets?
+# TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
+# --> change warnings to logging!
+# TODO: dynamic/static plotting!!!
+# TODO: documentation!!!
 # TODO: keep copy of raw dispersion curves before filtering [check]
+# TODO: CURVE & PROCSET
+# TODO: simplify the use of the procsets
+# TODO: load/save curves: add function to load a curve set!!
 # TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
+# TODO: read geometry with general file name!
+# TODO: change settings midprocessing
+# TODO: better way to work with windowing data??
+# TODO: plotting issues when plotting windowing data as curve
+# TODO: flip polarity
+# TODO: check what is happening with roll-along data
 
 class BaseManager:
     def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
@@ -161,10 +172,11 @@ class BaseManager:
         """Return the file path corresponding to the indices sin and rep as string"""
         if self.fileList is not None:
             sn = self._sql.get_shotfile(sin, rep).shots.item()
-            for i, fn in enumerate(self.fileList):
+            for i, fp in enumerate(self.fileList):
+                path, fn = os.path.split(fp)
                 sfn = re.findall(r'\d+', fn.replace(self.ext, ''))[0]
                 if str(sn) == str(sfn):
-                    return fn
+                    return os.path.join(path,fn)
         return None
 
     def _read_data(self):
@@ -196,6 +208,8 @@ class BaseManager:
                 if sin in self.data.keys():
                     if rep in self.data[sin].keys():
                         self._write_data(self.data[sin][rep], sin, rep, 'raw')
+            else:
+                raise FileNotFoundError
 
         endtime = time.time()
         print(f' {np.round(endtime - starttime, 2)} s')
@@ -221,10 +235,10 @@ class BaseManager:
 
         return par, amps, recs, sht
 
-    def _get_FV(self, sin, rep, procset, wid=-1, method='phaseshift'):
+    def _get_FV(self, sin, rep, procset, wid=-1, trafo_method='phaseshift'):
         """get FV data from database"""
 
-        vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
+        vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=trafo_method)
         return vel, kw, freq, FV
 
     def _set_data(self, data, sin, rep, procset, wid=-1):
@@ -235,12 +249,11 @@ class BaseManager:
         if not amps.empty:
             data.update_pst(amps_ari, sht, recs, par)
 
-    def _set_FV(self, data, sin, rep, procset, wid=-1, method='phaseshift'):
+    def _set_FV(self, data, sin, rep, procset, wid=-1, trafo_method='phaseshift'):
         """set FV data from database to current stream"""
-
-        vel, kw, freq, FV = self._get_FV(sin, rep, procset=procset, wid=wid, method=method)
+        vel, kw, freq, FV = self._get_FV(sin, rep, procset=procset, wid=wid, trafo_method=trafo_method)
         if FV is not None:
-            data.update_FV(method, vel, kw, freq, FV)
+            data.update_FV(trafo_method, vel, kw, freq, FV)
 
     # %% Processing
     def select_data(self, sin=1, rep=1, inplace=True, verbose = True):
@@ -291,7 +304,7 @@ class BaseManager:
             self.data[sin][rep] = stream
             self._write_data(stream, sin, rep, procset, wid = -1)
 
-    def transform(self, method, procset = None, use_windows = False, **kwargs):
+    def transform(self, trafo_method, procset = None, use_windows = False, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
 
         if procset is None:
@@ -310,31 +323,31 @@ class BaseManager:
 
                     tmp = copy.deepcopy(stream)
                     self._set_data(tmp, sin, rep, procset, wid)
-                    tmp.transform(method=method, **kwargs)
+                    tmp.transform(method=trafo_method, **kwargs)
                     self._write_FV(tmp,  sin, rep, procset, wid)
         else:
-            stream.transform(method=method, **kwargs)
+            stream.transform(method=trafo_method, **kwargs)
             self.data[sin][rep] = stream
             self._write_FV(stream, sin, rep, procset, wid = -1)
 
-    def _extract(self, stream, pck_mode, sin, rep, procset, wid, **kwargs):
+    def _extract(self, stream, pck_mode, sin, rep, procset, wid,**kwargs):
         """extract a dispersion curve and write to database"""
 
         try:
             stream.dcpicking(pck_mode=pck_mode, **kwargs)
         except:
-            warnings.warn('No dispersion image generated prior to dispersion curve extraction. '
+            warnings.warn('No dispersion image generated prior to dispersion curve extraction'
                           'Dispersion curve extraction not possible.')
             pass
 
-        method = stream.trafo_type
+        #method = stream.trafo_type
         xmid = stream.midpoint
 
         for pck_mode in stream.picks.keys():
             for dc_mode in stream.picks[pck_mode].keys():
                 dc = {
                     'xmid': xmid,
-                    'method': method,
+                    'method': stream.extraction_method,
                     'dc_mode': dc_mode,
                     'f': stream.picks[pck_mode][dc_mode]['f'],
                     'v': stream.picks[pck_mode][dc_mode]['v'],
@@ -342,7 +355,7 @@ class BaseManager:
 
                 self._sql.write_curve(dc, sin, rep, procset, wid, xmid)
 
-    def extract(self, procset = None, use_windows = False,  pck_mode = 'auto', **kwargs):
+    def extract(self, procset = None, use_windows = False,  pck_mode = 'auto', trafo_method = None, **kwargs):
         """apply dispersion curve picking to a stream"""
 
         if procset is None:
@@ -354,22 +367,28 @@ class BaseManager:
         rep = self.selected_ids[1]
         stream = self.current_stream
 
-        method = stream.trafo_type
-        self._set_data(stream, sin, rep, procset)
-        self._set_FV(stream, sin, rep, procset=procset, method=method)
-
         wids = self._sql.get_wids(sin, rep, procset)
         if use_windows:
             for wid in wids:
                 tmp = copy.deepcopy(stream)
                 self._set_data(tmp, sin, rep, procset, wid)
-                self._set_FV(tmp, sin, rep, procset, wid)
+                self._set_FV(tmp, sin, rep, procset, wid, trafo_method=trafo_method)
                 self._extract(tmp,pck_mode, sin = sin, rep = rep, wid = wid, procset=procset, **kwargs)
         else:
+            self._set_data(stream, sin, rep, procset)
+            self._set_FV(stream, sin, rep, procset=procset, trafo_method=trafo_method)
             self._extract(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset, **kwargs)
 
-    def _process_curve(self, attr, params, method = 'method', procset = None, new_procset = None, **kwargs):
+    def _process_curve(self, attr, params, trafo_method = None, auto_method = None,
+                       procset = None, new_procset = None, **kwargs):
         """apply a process to the dispersion curve data"""
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         if procset is None:
             procset = self._procset
@@ -399,7 +418,8 @@ class BaseManager:
 
             self._sql.write_curve(dc, params['sin'], params['rep'], new_procset, params['wid'], xmid)
 
-    def process_curve(self, attr, procset=None, method='tomo2D', dc_mode=0, use_windows = False, **kwargs):
+    def process_curve(self, attr, procset=None, trafo_method = None, auto_method = None,
+                      dc_mode=0, use_windows = False, **kwargs):
         """apply a process to a dispersion curve"""
 
         if procset is None:
@@ -409,6 +429,15 @@ class BaseManager:
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
+        data = self.data
+        stream = data[sin][rep]
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         wids = self._sql.get_wids(sin, rep, procset)
         if use_windows:
@@ -416,11 +445,34 @@ class BaseManager:
 
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                           'sin': sin, 'rep': rep, 'wid': wid}
-                self._process_curve(attr, params, method, procset=procset, **kwargs)
+
+                tmp = copy.deepcopy(stream)
+                self._set_data(tmp, sin, rep, procset, wid)
+                receiver = tmp.receiver
+                source = tmp.source
+                offsets = receiver - source
+                kwargs['offsets'] = offsets
+                kwargs['nchannels'] = len(receiver)
+                kwargs['dx'] = abs(receiver[0]-receiver[1])
+
+                self._process_curve(attr, params, trafo_method=trafo_method,
+                                    auto_method=auto_method, procset=procset, **kwargs)
         else:
             params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                       'sin': sin, 'rep': rep, 'wid': -1}
-            self._process_curve(attr, params, method, procset=procset, **kwargs)
+
+            if attr == 'estimate_error':
+
+                # add offsets to kwargs
+                receiver = stream.receiver
+                source = stream.source
+                offsets = receiver - source
+                kwargs['offsets'] = offsets
+                kwargs['nchannels'] = len(receiver)
+                kwargs['dx'] = abs(receiver[0] - receiver[1])
+
+            self._process_curve(attr, params, trafo_method=trafo_method,
+                                    auto_method=auto_method, procset=procset, **kwargs)
 
     def _save_curve(self, path2dc, name, params, format = 'csv', **kwargs):
         """save a dispersion curve"""
@@ -435,7 +487,8 @@ class BaseManager:
             dc.save(path2dc, name, format=format, **kwargs)
             return curve_data['xmid'].unique().item()
 
-    def save_curve(self, procset=None, method='tomo2D', dc_mode=0, use_windows = False, **kwargs):
+    def save_curve(self, procset=None, trafo_method = None, auto_method = None,
+                   dc_mode=0, use_windows = False, **kwargs):
         """save a dispersion curve for a defined source location, repetition and window id"""
 
         if procset is None:
@@ -443,6 +496,13 @@ class BaseManager:
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
 
@@ -476,9 +536,9 @@ class BaseManager:
         rep = self.selected_ids[1]
         stream = self.current_stream
 
-        method = kwargs.pop('method', 'phaseshift')
+        method = kwargs.pop('trafo_method', 'phaseshift')
         if attr in ['dispersionImage', 'dispersionImageComposite']:
-            self._set_FV(stream, sin, rep, procset=procset, method=method)
+            self._set_FV(stream, sin, rep, procset=procset, trafo_method=method)
 
         wids = self._sql.get_wids(sin, rep, procset)
         if use_windows:
@@ -487,17 +547,25 @@ class BaseManager:
                 self._set_data(tmp, sin, rep, procset, wid)
 
                 if attr in ['dispersionImage','dispersionImageComposite']:
-                    self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
+                    self._set_FV(tmp, sin, rep, procset=procset, trafo_method=method, wid=wid)
 
                 tmp.plot(attr, **kwargs)
         else:
             stream.plot(attr, **kwargs)
 
-    def plot_curve(self, procset=None, method='phaseshift', dc_mode=0, use_windows = False, **kwargs):
+    def plot_curve(self, procset=None, trafo_method='phaseshift', auto_method = None,
+                   dc_mode=0, use_windows = False, **kwargs):
         """plot a dispersion curve"""
 
         if procset is None:
             procset = self._procset
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
@@ -519,30 +587,41 @@ class BaseManager:
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
             dc.plot(**kwargs)
 
-    def plot_pseusodsection(self, procset=None, method='tomo2D', dc_mode=0, cmap='viridis', **kwargs):
+    def plot_pseusodsection(self, procset=None, trafo_method=None, auto_method = None,
+                            dc_mode=0, cmap='viridis', axes = None, **kwargs):
         """plot the Rayleigh wave phase velocity pseudosection"""
 
         if procset is None:
             procset = self._procset
 
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
+
         _, recs_all = self._sql.get_geometry(sin = '*')
         params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode}
-
         curves = self._sql.read_curve(params)
 
         if not curves.empty:
-
             xmids = curves['xmid'].unique()
-
             vmin = kwargs.pop('vmin', 200)
             vmax = kwargs.pop('vmax', 500)
 
-            fmin = curves['frequency'].min()
-            fmax = curves['frequency'].max()
+            fmin = kwargs.pop('fmin', curves['frequency'].min())
+            fmax = kwargs.pop('fmax', curves['frequency'].max())
 
             title = kwargs.pop('title', '')
+            outfile = kwargs.pop('outfile', None)
 
-            fig, ax = plt.subplots()
+            if axes is None:
+                fig, ax = plt.subplots()
+            else:
+                ax = axes
+                fig = ax.figure
+
             for xmid in xmids:
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
                           'xmid': xmid}
@@ -554,15 +633,18 @@ class BaseManager:
                 dc.plotColumn(axes=ax,
                               xmid=xmid,
                               vmin=vmin, vmax=vmax,
-                              cmap=cmap, y_value='f',
-                              width=0.5, **kwargs)
+                              cmap=cmap, y_value='f',**kwargs)
 
             plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
             ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
             ax.set_ylim([fmin, fmax])
 
             ax.set_title(title)
-            plt.show()
+            if outfile:
+                fig.savefig(outfile)
+                plt.close()
+            else:
+                plt.show()
         else:
             warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
 
@@ -670,7 +752,8 @@ class MASW2DManager(BaseManager):
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
-    def extract_curves(self, procset = None, pck_mode='auto', apply_to = 'all', use_windows=False, **kwargs):
+    def extract_curves(self, procset = None, trafo_method = None, auto_method = None, pck_mode='auto',
+                       apply_to = 'all', use_windows=False, **kwargs):
 
         # Apply process to current selection only
         if apply_to == 'cur':
@@ -680,7 +763,8 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Dispersion curve extraction of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' ..... ', end = '')
-            self.extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, **kwargs)
+            self.extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, trafo_method = trafo_method,
+            auto_method = auto_method, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -697,12 +781,13 @@ class MASW2DManager(BaseManager):
                     sys.stdout.write(f'\rDispersion curve extraction of (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self.extract(procset=procset,use_windows=use_windows, pck_mode=pck_mode, **kwargs)
+                    self.extract(procset=procset,use_windows=use_windows, pck_mode=pck_mode, trafo_method = trafo_method,
+                                    auto_method = auto_method, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
-    def process_curves(self, attr='smooth', procset = None, method = 'phaseshift',
+    def process_curves(self, attr='smooth', procset = None, trafo_method = None, auto_method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
         """process the dispersion curves"""
 
@@ -714,7 +799,8 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Applying {attr} to dispersion curve of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' ..... ', end = '')
-            self.process_curve(attr=attr, procset=procset, method=method,
+            self.process_curve(attr=attr, procset=procset, trafo_method = trafo_method,
+                                auto_method = auto_method,
                                dc_mode=dc_mode, use_windows = use_windows, **kwargs)
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -731,13 +817,14 @@ class MASW2DManager(BaseManager):
                     sys.stdout.write(f'\rApplying {attr} to dispersion curve of (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self.process_curve(attr=attr, procset=procset, method=method,
+                    self.process_curve(attr=attr, procset=procset, trafo_method = trafo_method,
+                                        auto_method = auto_method,
                                        dc_mode=dc_mode, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
-    def plot_curves(self, procset = None, method = 'phaseshift',
+    def plot_curves(self, procset = None, trafo_method = None, auto_method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False,**kwargs):
         """process the dispersion curves"""
 
@@ -746,7 +833,8 @@ class MASW2DManager(BaseManager):
             if self.current_stream is None:
                 self.select_data(inplace = True, verbose=False)
 
-            self.plot_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows,**kwargs)
+            self.plot_curve(procset=procset, trafo_method = trafo_method,
+            auto_method = auto_method,dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
         # Apply process to all data sets
         elif apply_to == 'all':
@@ -754,12 +842,20 @@ class MASW2DManager(BaseManager):
                 for rep in self.data[sin].keys():
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
-                    self.plot_curve(procset=procset, method=method,
+                    self.plot_curve(procset=procset, trafo_method = trafo_method,
+                                        auto_method = auto_method,
                                        dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
-    def save_curves(self, procset = None, method = 'phaseshift',
+    def save_curves(self, procset = None, trafo_method = None, auto_method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
         """process the dispersion curves"""
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
         path2geom = os.path.join(dir, '1_geom')
@@ -775,7 +871,9 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Save dispersion curves corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' to file ..... ', end = '')
-            xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
+            xmid = self.save_curve(procset=procset, trafo_method = trafo_method,
+                                    auto_method = auto_method,dc_mode=dc_mode,
+                                   use_windows=use_windows, **kwargs)
             xmids += xmid
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -793,7 +891,9 @@ class MASW2DManager(BaseManager):
                           f'({sin}, {rep}) to file ..... ')
                     sys.stdout.flush()
 
-                    xmid = self.save_curve(procset=procset, method=method,dc_mode=dc_mode, use_windows=use_windows, **kwargs)
+                    xmid = self.save_curve(procset=procset, trafo_method = trafo_method,
+                                            auto_method = auto_method,dc_mode=dc_mode,
+                                           use_windows=use_windows, **kwargs)
                     xmids += xmid
 
             endtime = time.time()
@@ -847,8 +947,16 @@ class MASW2DManager(BaseManager):
             print(f'{np.round(endtime - starttime, 2)} s')
 
     # %% curve combination
-    def prepare_CC(self, procset = None, dc_mode = 0, use_windows=False, **kwargs):
+    def prepare_CC(self, procset = None, trafo_method = None, auto_method = None,
+                   dc_mode = 0, use_windows=False, **kwargs):
         """prepare data for curve combination"""
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         if procset is None:
             procset = self._procset
@@ -859,7 +967,7 @@ class MASW2DManager(BaseManager):
 
         params = {'procset': "'%s'" % procset, 'dc_mode': dc_mode}
 
-        if 'method' in kwargs:
+        if method:
             params['method'] = "'%s'" % kwargs['method']
             kwargs.pop('method')
 
@@ -897,8 +1005,16 @@ class MASW2DManager(BaseManager):
                     dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
                     self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
 
-    def combine(self, procset = None, dc_mode = 0, use_windows=False, **kwargs):
+    def combine(self, procset = None, dc_mode = 0, trafo_method = None, auto_method = None,
+                use_windows=False, **kwargs):
         """combine dispersion curves with same receiver spread location"""
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         if self.CC is None:
             self.prepare_CC(procset, dc_mode, use_windows, **kwargs)
@@ -917,7 +1033,7 @@ class MASW2DManager(BaseManager):
             dc = self.CC.data[key]['cmb']
             data = {
                 'xmid': key,
-                'method': 'tomo2D',
+                'method': method,
                 'dc_mode': 0,
                  'f': dc.frequency,
                  'v': dc.velocity,
@@ -925,11 +1041,18 @@ class MASW2DManager(BaseManager):
 
             self._sql.write_curve(data, -1, -1, procset=procset, wid=-1, xmid=key)
 
-    def process_CC(self, attr='smooth', procset=None, method='phaseshift', dc_mode=0, **kwargs):
+    def process_CC(self, attr='smooth', procset=None, trafo_method = None, auto_method = None, dc_mode=0, **kwargs):
         """process the dispersion curves"""
 
         if procset is None:
             procset = self._procset
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         starttime = time.time()
         print(f'Applying {attr} to dispersion curves ..... ', end='')
@@ -953,8 +1076,15 @@ class MASW2DManager(BaseManager):
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
 
-    def plot_CC(self, procset=None, method='phaseshift', dc_mode=0, **kwargs):
+    def plot_CC(self, procset=None, trafo_method = None, auto_method = None, dc_mode=0, **kwargs):
         """plot the dispersion curves"""
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         if procset is None:
             procset = self._procset
@@ -973,11 +1103,18 @@ class MASW2DManager(BaseManager):
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
             dc.plot(**kwargs)
 
-    def save_CC(self, procset=None, method='phaseshift', dc_mode=0, format='csv', **kwargs):
+    def save_CC(self, procset=None, trafo_method = None, auto_method = None, dc_mode=0, format='csv', **kwargs):
         """save the dispersion curves based on receiver spread midpoint"""
 
         if procset is None:
             procset = self._procset
+
+        if trafo_method and auto_method:
+            method = f'{trafo_method}_{auto_method}'
+        elif trafo_method:
+            method = trafo_method
+        else:
+            method = auto_method
 
         params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                   'method': "'%s'" % method, 'dc_mode': dc_mode}
@@ -1165,7 +1302,7 @@ class Tomo2DManager(BaseManager):
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
-    def run(self, min_offset=3, max_offset=1e6, lam = 1, rel_err = None, procset = None):
+    def run(self, min_offset=3, max_offset=1e6, lam = 1, rel_err = None, procset = None, **kwargs):
         """run the tomographic like approach"""
 
         if procset is None:
@@ -1190,9 +1327,9 @@ class Tomo2DManager(BaseManager):
         freq = self._sql.read_sql(sql)['frequency'].values
 
         # obtain the shot parameters
-        _,recs = self._sql.get_geometry(1)
-        dx = np.mean(np.diff(recs['rx'].iloc[:-1].values))
-        nrec = len(recs)
+        _, recs_all = self._sql.get_geometry(sin='*')
+        dx = np.mean(np.diff(recs_all['rx'].iloc[:-1].values))
+        nrec = len(recs_all)
         nshot = len(self.data)
 
         # set up the system of equations
@@ -1207,10 +1344,14 @@ class Tomo2DManager(BaseManager):
             for sin in self.data.keys():
 
                 _, _, _, sht = self._sql.read_data(sin,1, procset = 'raw')
+                _,recs = self._sql.get_geometry(sin=sin)
 
                 # %% process forward shots
-                offset = recs['rx'].iloc[:-1].values - sht['sx'].item()  # signed offset vector
-                oids = np.argwhere((offset >= min_offset) & (offset <= max_offset))[:, 0]
+                offset = recs_all['rx'].iloc[:-1].values - sht['sx'].item()  # signed offset vector
+                oids = np.argwhere(((offset >= min_offset) &
+                                    (offset <= max_offset)) &
+                                   ((recs_all['rx'].iloc[:-1].values >= recs['rx'].iloc[:-1].min()) &
+                                    (recs_all['rx'].iloc[:-1].values <= recs['rx'].iloc[:-1].max())))[:, 0]
 
                 columns = ['pd%d'%i for i in range(1,len(offset)+1)]
 
@@ -1236,7 +1377,9 @@ class Tomo2DManager(BaseManager):
                             error[iii] = 1
 
                 # %% process reverse shots
-                oids = np.argwhere((offset >= -max_offset) & (offset <= -min_offset))[:, 0]
+                oids = np.argwhere(((offset >= -max_offset) & (offset <= -min_offset)) &
+                                   ((recs_all['rx'].iloc[:-1].values >= recs['rx'].iloc[:-1].min()) &
+                                    (recs_all['rx'].iloc[:-1].values <= recs['rx'].iloc[:-1].max())))[:, 0]
 
                 # fill A, dphi, error
                 for ii in oids:
@@ -1266,8 +1409,43 @@ class Tomo2DManager(BaseManager):
             phi_vel, phi_model = tomo2D_phasediff(lam=lam, f=f, A=A, dphi=dphi, w=w)
             phi_vel_all[:, jj] = phi_vel
 
+            # if kwargs.setdefault('showFDBFResults', False):
+            #     recs_plot = np.asarray(recs_all['rx'].iloc[:-1])
+            #
+            #     axes = kwargs.pop('axes', None)
+            #     outfile = kwargs.pop('outfile', None)
+            #
+            #     if axes is None:
+            #         fig, ax = plt.subplots(1,2, figsize=(6, 2))
+            #     else:
+            #         ax = axes
+            #         fig = ax.figure
+            #
+            #     ax[0].plot(dphi,color = 'k', marker = 'o', markersize=5)
+            #     ax[0].plot(phi_model, color = 'r')
+            #     ax[0].set_xlabel("offset (m)")
+            #     ax[0].set_ylabel(f"phase differences (rad)")
+            #     ax[0].grid()
+            #
+            #     ax[1].scatter(recs_plot,phi_vel, s=15, c='darkgrey', marker ='o',
+            #               edgecolor='k', linewidth=0.2, zorder=-2, label = f'f = {round(f)} Hz')
+            #     ax[1].set_xlim([np.min(recs_plot),np.max(recs_plot)])
+            #     ax[1].set_ylim([10,600])
+            #     ax[1].set_ylabel(f"phase velocity (m/s)")
+            #     ax[1].set_xlabel("offset (m)")
+            #     ax[1].legend(loc = 'lower right', frameon=True)
+            #     ax[1].grid()
+            #
+            #     if outfile:
+            #         parent = os.path.dirname(outfile)
+            #         safe_makedirs(parent)
+            #         fig.savefig(outfile)
+            #         plt.close()
+            #     else:
+            #         plt.show()
+
         # add dispersion curves to database
-        xmids = recs['rx'].iloc[:-1].values + dx / 2
+        xmids = recs_all['rx'].iloc[:-1].values + dx / 2
 
         for i in range(len(phi_vel_all)):
 
@@ -1306,7 +1484,8 @@ class Tomo2DManager(BaseManager):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
 
-            self._process_curve(attr, params, method, procset=procset, **kwargs)
+            self._process_curve(attr, params, trafo_method = None,
+            auto_method = 'tomo2D', procset=procset, **kwargs)
             curve_data = self._sql.read_curve(params)
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])

@@ -16,8 +16,8 @@ from .curve import DispersionCurve
 from .utils import *
 
 import warnings
-
 warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
 
 # TODO advanced F-K filtering
 # TODO LRT
@@ -39,6 +39,9 @@ class SeismicStream:
         channel_nr : int, optional
         pre_trigger : float, optional
         """
+
+        # logger
+        self.logger = create_logging(name = 'STREAM')
 
         # seismic record filename
         self._st = None
@@ -202,9 +205,9 @@ class SeismicStream:
             elif sy_int != 0:
                 sx = sy_int / abs(scale) if scale < 0 else sy_int * scale
             else:
-                warnings.warn('Source location is missing. '
-                      'Provide a geometry file or edit shot file header.\n'
-                      'Using dummy geometry for now.')
+                warn_msg = ('Source location is missing. Provide a geometry file or edit shot file header. '
+                            'Using dummy geometry for now.')
+                self.logger.warning(warn_msg)
                 sx = 0
 
             if rx_int != 0:
@@ -212,9 +215,9 @@ class SeismicStream:
             elif ry_int != 0:
                 rx = ry_int / abs(scale) if scale < 0 else ry_int * scale
             else:
-                warnings.warn('Receiver location is missing. '
-                      'Provide a geometry file or edit shot file header.\n'
-                      'Using dummy geometry for now.')
+                warn_msg = ('Receiver location is missing. Provide a geometry file or edit shot file header.'
+                            'Using dummy geometry for now.')
+                self.logger.warning(warn_msg)
                 rx = ti
             sn = str(trace.stats["station"])
 
@@ -487,6 +490,7 @@ class SeismicStream:
         #self.nstacks = 1
         self.tapered = False
         self.trafo_type = None
+        self.extraction_method = None
         self.dispersive_energy = None
         self.velocity = None
         self.frequency = None
@@ -771,13 +775,14 @@ class SeismicStream:
         elif by == 'offset':
             min = kwargs.setdefault('min', -1e10)
             max = kwargs.setdefault('max', 1e10)
-            self.trim_by_offset(min,max)
+            which = kwargs.setdefault('which', 'forward')
+            self._trim_by_offset_both(min,max,which)
         elif by == 'separation':
             sep = kwargs.setdefault('dx', self.dx)
             self._trim_by_receiver_separation(sep)
         elif by == 'window':
             xmid = kwargs.setdefault('xmid', self.midpoint)
-            nwin = kwargs.setdefault('nwin', len(self.receiver))
+            nwin = kwargs.setdefault('wlen', len(self.receiver))
             self._trim_by_trace_window(nwin, xmid)
         elif by == 'select':
             trace_indices = kwargs.setdefault('ids', np.arange(len(self.receiver)))
@@ -803,8 +808,8 @@ class SeismicStream:
             self._pst = st_proc
             self._update_params_from_stream(st_proc)
         else:
-            warnings.warn(f'Start and end time must be numeric not {type(start_time), type(end_time)}. '
-                          f'No process applied.')
+            warn_msg = f'Start and end time must be numeric not {type(start_time), type(end_time)}. No process applied.'
+            self.logger.warning(warn_msg)
 
     def trim_by_offset(self, min_offset, max_offset):
         """cut traces outside of the offsets limits"""
@@ -821,21 +826,72 @@ class SeismicStream:
 
             oids = np.argwhere((offset >= min_offset) & (offset <= max_offset))[:, 0]
 
+            if len(oids) > 0:
+
+                st_new = obspy.Stream()
+                for i in oids:
+                    st_new.append(st_proc[i])
+
+                # update stream
+                self._pst = st_new
+                self._update_params_from_stream(st_new)
+            else:
+                warn_msg = 'Min and max offset out of bounds. No process applied to stream.'
+                self.logger.warning(warn_msg)
+
+            return oids
+        else:
+            warn_msg = (f'Min and max offset must be numeric not {type(min_offset), type(max_offset)}. '
+                        f'No process applied.')
+            self.logger.warning(warn_msg)
+            return []
+
+    def _trim_by_offset_both(self, min_offset, max_offset, which = 'forward'):
+        """cut traces outside of the offsets limits considering forward and reverse offset shot"""
+
+        if self._pst is None:
+            st_proc = self._st.copy()
+        else:
+            st_proc = self._pst.copy()
+
+        if isinstance(min_offset, numbers.Number) and isinstance(max_offset, numbers.Number):
+            receiver = self.receiver
+            source = self.source
+            offset = receiver - source
+
+            # sort min max
+            mmo = sorted([np.abs(min_offset), np.abs(max_offset)])
+
+            # offset ids associated to forward shot
+            oids_fw = np.argwhere((offset >= mmo[0]) & (offset <= mmo[1]))[:, 0]
+
+            # offset ids associated to reverse shot
+            oids_rv = np.argwhere((offset >= -mmo[1]) & (offset <= -mmo[0]))[:, 0]
+
+            if (len(oids_fw) > 0) & (len(oids_rv) > 0):
+                oids = oids_fw if which == 'forward' else oids_rv
+            elif len(oids_fw) > 0:
+                oids = oids_fw
+            elif len(oids_rv) > 0:
+                oids = oids_rv
+            else:
+                warn_msg = 'Min and max offset out of bounds. No process applied to stream.'
+                self.logger.warning(warn_msg)
+                return [],[]
+
             st_new = obspy.Stream()
             for i in oids:
                 st_new.append(st_proc[i])
 
-            if len(st_new) > 0:
-                # update
-                self._pst = st_new
-                self._update_params_from_stream(st_new)
-                return oids
-            else:
-                warnings.warn('Min and max offset out of bounds. No process applied.')
-                return []
+            self._pst = st_new
+            self._update_params_from_stream(st_new)
+            return oids_fw, oids_rv
+
         else:
-            warnings.warn(f'Min and max offset must be numeric not {type(min_offset), type(max_offset)}. '
-                          f'No process applied.')
+            warn_msg = (f'Min and max offset must be numeric not {type(min_offset), type(max_offset)}. '
+                        f'No process applied.')
+            self.logger.warning(warn_msg)
+            return [], []
 
     def _trim_by_receiver_separation(self,sep):
         """select channels with specified geophone separation"""
@@ -865,8 +921,8 @@ class SeismicStream:
                 self._pst = st_new
                 self._update_params_from_stream(st_new)
         else:
-            warnings.warn(f'Separation must be numeric not {type(sep)}. '
-                          f'No process applied.')
+            warn_msg = f'Separation must be numeric not {type(sep)}. No process applied.'
+            self.logger.warning(warn_msg)
 
     def _trim_by_trace_window(self, nwin, xmid):
         """select traces around xmid and window size"""
@@ -886,9 +942,11 @@ class SeismicStream:
                 else:
                     trace_select = range(int((nchannels - nwin - 1) / 2), int((nchannels + nwin - 1) / 2) + 1)
 
-            return trace_select
-        else:
-            return None
+            self._select_traces(trace_select)
+
+        #     return trace_select
+        # else:
+        #     return None
 
     def _select_traces(self, trace_indices):
         """select a subset of a stream based on trace indices"""
@@ -1020,7 +1078,7 @@ class SeismicStream:
         # update
         self._pst = st_proc
 
-    def _mute(self, tapering='mild'):
+    def _mute(self, tapering='mild', **kwargs):
         """
         interactive linear muting
 
@@ -1041,8 +1099,8 @@ class SeismicStream:
 
         while terminate is False:
 
-            fig, ax = plt.subplots(figsize=(7, 5))
-            self._plotSeismogram(axes=ax, amp_scale=1)
+            fig, ax = plt.subplots(figsize=(8, 5))
+            self._plotSeismogram(axes=ax, amp_scale=1, **kwargs)
 
             text = '\n'.join((
                 r'$\bf{Keyboard \quad commands:}$',
@@ -1302,17 +1360,17 @@ class SeismicStream:
         iF = nextpow2(iT)[1]
         FK = np.zeros((iF,iF)).astype("complex")
 
-        FK_unwrap = np.flipud(FK_unwrap)
         pos_freq = iF // 2
+        FK_unwrap = np.flipud(FK_unwrap)
 
         # exploit symmetry
         # top half
-        FK[0: pos_freq] = FK_unwrap
+        FK[:pos_freq] = FK_unwrap
         # bottom half
-        FK[pos_freq:] = np.roll(np.roll(np.flipud(np.fliplr(FK_unwrap)), 1).transpose(), 1).transpose()
+        FK[pos_freq:,] = np.conj(np.rot90(FK_unwrap, 2))
 
+        # back transformation
         FK = np.fft.ifftshift(np.transpose(np.conjugate(FK)))
-
         amps = np.fft.ifft2(FK,s=(iF,iF)).real
         amps = amps[:iX,:iT]
 
@@ -1363,7 +1421,7 @@ class SeismicStream:
 
         # select only positive frequencies
         pos_freq = FK.shape[0] // 2
-        FK_unwrap = FK[0:pos_freq]
+        FK_unwrap = FK[:pos_freq]
         FK_unwrap = np.flipud(FK_unwrap)
         FK_unwrap = np.fft.fftshift(FK_unwrap,axes=1)
 
@@ -1412,7 +1470,7 @@ class SeismicStream:
             ax1 = fig.add_subplot(gs[1:5, 0:2])
 
             self._plotGeometry(axes=ax0,show=False)
-            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax1)  # xlimit=np.max(kwpos[:npoints//2]))
+            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax1, **kwargs)  # xlimit=np.max(kwpos[:npoints//2]))
             text = '\n'.join((
                 r'$\bf{Keyboard \quad commands:}$',
                 r'Press $\bf{e}$ to stop the process.',
@@ -1448,7 +1506,8 @@ class SeismicStream:
                     safe_makedirs(path)
 
                     if os.path.isfile(fname):
-                        warnings.warn('File already exists. Fk filter will be appended.')
+                        warn_msg = 'File already exists. Fk filter will be appended.'
+                        self.logger.warning(warn_msg)
 
                     file = open(fname, "a+")
                     file.write(f'{self.pre}\t{key}\t{len(fp)}\n')
@@ -1497,8 +1556,8 @@ class SeismicStream:
 
         if show:
             fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-            self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0])
-            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1])
+            self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
+            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
             ax[0].set_title('Raw data', fontweight='bold')
             ax[1].set_title('Post fk filter', fontweight='bold')
             plt.tight_layout()
@@ -1590,17 +1649,19 @@ class SeismicStream:
 
                 if show:
                     fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-                    self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0])
-                    self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1])
+                    self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
+                    self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
                     ax[0].set_title('Raw data', fontweight='bold')
                     ax[1].set_title('Post fk filter', fontweight='bold')
                     plt.tight_layout()
                     plt.show()
 
             else:
-                warnings.warn("Incorrect filename provided. No filtering applied.")
+                warn_msg = "Incorrect filename provided for FK filtering. No filtering applied."
+                self.logger.warning(warn_msg)
         else:
-            warnings.warn("No file provided. No filtering applied.")
+            warn_msg = "No file provided with FK filter. No filtering applied."
+            self.logger.warning(warn_msg)
 
     def transform(self, method = 'phaseshift'):
         """Apply the wave field transformation"""
@@ -1817,7 +1878,7 @@ class SeismicStream:
         self.wavenumber = ks
 
     def _MOPA(self, weighted = False, std = None, rel_err = 5/100, abs_err = None,
-              stopAtChi2=2, outfile = None, **kwargs):
+              stopAtChi2=2, **kwargs):
         """Multi-offset phase analysis (MOPA; Strobbia and Foti, 2014)"""
 
         dt = self.dt
@@ -1871,6 +1932,7 @@ class SeismicStream:
 
             chi2 = np.inf
             offsets_index = 0
+            offsets_inv = offsets
 
             # check the convergence and remove near offset geophones if chi^2 is too high
             while (chi2 >= stopAtChi2) & (len(offsets[offsets_index:]) >= min_nrec):
@@ -1904,93 +1966,26 @@ class SeismicStream:
 
                 offsets_index += 1
 
+            if chi2 <= stopAtChi2:
+                freqs.append(freq[j])  # frequencies
+                vel0s.append(2 * np.pi * freq[j] / k0)  # phase velocities
+                chi2s.append(chi2)
+
             # final inversion results
             results_dict_plotting[j] = {'offsets': offsets_inv,
                                         'mag': mag,
                                         'phase': phase,
                                         'k0': k0,
-                                        'phi0': phi0}
-
-            freqs.append(freq[j])  # frequencies
-            vel0s.append(2 * np.pi * freq[j] / k0)  # phase velocities
-            chi2s.append(chi2)
+                                        'phi0': phi0,
+                                        'freq': freq[j],
+                                        'vel': 2 * np.pi * freq[j] / k0,
+                                        'chi2':chi2}
 
         if len(vel0s) > 0:
 
             # %% plot MOPA results
             if kwargs.setdefault('showMOPAResults',False):
-
-                # %% dispersion curve obtained in classical sense as comparison
-                self._fdbf()
-                self.dcpicking(pck_mode='auto')
-                f_fdbf = self.picks['auto'][0]['f']
-                v_fdbf = self.picks['auto'][0]['v']
-
-                fig, ax = plt.subplots(3, 1, figsize=(8, 6), constrained_layout=True)
-                color = plt.cm.viridis(np.linspace(0, 0.9, len(np.arange(len(freqs)))))
-
-                for ii in np.arange(len(freqs)):
-
-                    # amplitude
-                    ax[0].scatter(results_dict_plotting[ii]['offsets'], results_dict_plotting[ii]['mag'],
-                                  marker="o", s=15, c=color[ii].reshape(1,-1), edgecolor='k',
-                                  linewidth=0)
-
-                    # fitted lines
-                    ax[1].plot(results_dict_plotting[ii]['offsets'],
-                               phase_response(results_dict_plotting[ii]['offsets'],
-                                              results_dict_plotting[ii]['k0'],
-                                              results_dict_plotting[ii]['phi0']),
-                               color = color[ii].reshape(1,-1),
-                               alpha = 0.75,linewidth = 0.8,linestyle='dashed')
-
-                    # phase data
-                    ax[1].scatter(results_dict_plotting[ii]['offsets'],
-                                  np.unwrap(results_dict_plotting[ii]['phase'], axis=0),
-                                  marker="o", s=15, c=color[ii].reshape(1,-1),
-                                  edgecolor='k',
-                                  linewidth=0, zorder=2)
-
-                    # dispersion curve from MOPA
-                    if chi2s[ii] > stopAtChi2:
-                        ec = 'r'
-                        label = f'MOPA - chi^2 > {stopAtChi2}'
-                    else:
-                        ec = 'k'
-                        label = f'MOPA - chi^2 <= {stopAtChi2}'
-
-                    ax[2].scatter(freqs[ii], vel0s[ii], marker="o", s=25, c=color[-1].reshape(1, -1),
-                                  edgecolor=ec, linewidth=0.8, zorder=2,
-                                  label=label, alpha=0.7)
-
-                # dispersion curve from FDBF
-                ax[2].scatter(f_fdbf, v_fdbf, marker="s", s=25, c=color[0].reshape(1,-1),
-                              edgecolor='k', linewidth=0.8, zorder=-2, label = 'FDBF')
-
-                for axi in ax.flat:
-                    axi.grid(True, linestyle=':')
-                ax[0].set_xlabel("offset (m)")
-                ax[1].set_xlabel("offset (m)")
-                ax[0].set_ylabel(f"amplitude")
-                ax[1].set_ylabel(f"phase (rad)")
-                plot_colorBar(ax[0], self.fmin, self.fmax, label='f (Hz)', orientation='vertical')
-                plot_colorBar(ax[1], self.fmin, self.fmax, label='f (Hz)', orientation='vertical')
-                handles, labels = plt.gca().get_legend_handles_labels()
-                by_label = OrderedDict(zip(labels, handles))
-                ax[2].legend(by_label.values(), by_label.keys(),loc='upper right',
-                             frameon=True, title='Transformation')
-                ax[2].set_ylabel(f"phase velocity (m/s)")
-                ax[2].set_xlabel(f"frequency (Hz)")
-                ax[2].set_ylim([self.vmin,self.vmax])
-                ax[2].set_xlim([self.fmin, self.fmax])
-                ax[0].set_title('MOPA - Shotfile: ' + self.pre, fontweight='bold')
-                fig.align_ylabels(ax)
-
-            if outfile:
-                fig.savefig(outfile)
-                plt.close()
-            else:
-                plt.show()
+                self._plotMOPA(results_dict_plotting,**kwargs)
 
             # dispersion curve
             self._pick = True
@@ -1998,8 +1993,8 @@ class SeismicStream:
                                                'v': np.array(vel0s),
                                                'chi2': np.array(chi2s)}}
         else:
-            warnings.warn('No dispersion curve extracted.')
-
+            warn_msg = 'No dispersion curve extracted.'
+            self.logger.warning(warn_msg)
 
     def compute_phasediffs(self):
         """compute phase differences between adjacent receivers for one shot file"""
@@ -2055,7 +2050,7 @@ class SeismicStream:
 
             if auto_method == 'max':
                 # locate amplitude maxima in dispersion image at each frequency, i.e. apparent dispersion curve
-                self.trafo_type = f'{self.trafo_type}_max'
+                self.extraction_method = f'{self.trafo_type}_max'
 
                 peaks_idx = np.argmax(self.dispersive_energy, axis=0)
 
@@ -2066,12 +2061,15 @@ class SeismicStream:
 
             elif auto_method == 'MOPA':
                 # Apply MOPA to extract the dispersion curves
-                self.trafo_type = 'MOPA'
+                self.extraction_method = 'MOPA'
                 self._MOPA(**kwargs)
             else:
                 raise NotImplementedError
 
         elif pck_mode == 'manual':
+
+            self.extraction_method = self.trafo_type
+
             # interactive dispersion curve picking by selection of boundary boxes
             if axes is None:
                 fig = plt.figure(figsize=(16, 9), constrained_layout=True)
@@ -2102,7 +2100,7 @@ class SeismicStream:
                                loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.),
                        bbox_transform=ax1.transAxes)
             ax1.add_artist(at)
-            self._plotDispersionImage(axes=ax1)
+            self._plotDispersionImage(axes=ax1, **kwargs)
 
             ax1.set_title(f"Dispersion curve picking", fontweight="bold")
 
@@ -2278,9 +2276,11 @@ class SeismicStream:
                                     vel=self.picks[self._pck_mode][0]['v'])
                     curve.save(prjdir, fname, ext)
                 else:
-                    warnings.warn(f'Mode id {id} does not exist yet. No data has been saved.')
+                    warn_msg = f'Mode id {id} does not exist yet. No data has been saved.'
+                    self.logger.warning(warn_msg)
             else:
-                warnings.warn('No pick set has been created so far. No data has been saved.')
+                warn_msg = 'No pick set has been created so far. No data has been saved.'
+                self.logger.warning(warn_msg)
 
     def _norm_power(self,power):
         """normalize power spectrum"""
@@ -2330,12 +2330,13 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(6, 2))
         else:
             ax = axes
+            fig = axes.figure
 
         all_receiver = self._receiver(self._st)
 
         ax.scatter(all_receiver, np.zeros(len(all_receiver)), marker='v', c='k',label='active channels',alpha = 0.7)
         ax.scatter(self.receiver, np.zeros(len(self.receiver)), marker='v', c='lightgrey',label='selected channels')
-        ax.scatter(self.source, 0.2, marker='*', s= 60,c='limegreen', label='shot location')
+        ax.scatter(self.source, 0.2, marker='*', s= 60,c='r', label='shot location')
         ax.legend(loc='upper right', ncol=3, frameon=True,
                   edgecolor = 'k',fontsize = 6,bbox_to_anchor=(1, 1.5)).get_frame().set_boxstyle('Square', pad=0.2)
 
@@ -2372,8 +2373,6 @@ class SeismicStream:
         elif show:
             plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotSeismogram(self, axes=None, st = None, amp_scale=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot seismogramm of a single shot file"""
@@ -2394,6 +2393,7 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(8,6))
         else:
             ax = axes
+            fig = axes.figure
 
         amps = self._amps(st=st)
         amps = self._detrend_signal(amps)
@@ -2416,7 +2416,7 @@ class SeismicStream:
         if kwargs.setdefault('show_map', 'True'):
             ax.imshow(amps.T,
                      extent=[-1,(len(amps)-1)+1,t[-1],t[0]],
-                     cmap='bwr',
+                     cmap=kwargs.pop('cmap','bwr'),
                      aspect='auto',
                      vmin=-1, vmax=1,
                      interpolation='bicubic')
@@ -2454,6 +2454,12 @@ class SeismicStream:
                               pad=0, borderpad=0.8, frameon=False,
                               bbox_transform=ax.transAxes)
             ax.add_artist(at)
+        else:
+            ax.tick_params(
+                axis='x',
+                which='both',
+                bottom=False,
+                labelbottom=False)
 
         ymin = kwargs.pop('ymin', np.min(t))
         ymax = kwargs.pop('ymax', np.max(t))
@@ -2473,8 +2479,6 @@ class SeismicStream:
         elif show:
             plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotSpectrogram(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot spectrogram"""
@@ -2533,6 +2537,7 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(8,6))
         else:
             ax = axes
+            fig = axes.figure
 
         title = kwargs.pop('title', None)
 
@@ -2541,7 +2546,7 @@ class SeismicStream:
                         abs_amps,
                         np.linspace(abs_amps_min, abs_amps_max, 21),
                         #extend='both',
-                        cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
+                        cmap=plt.cm.get_cmap(kwargs.setdefault('cmap', 'viridis')))
 
         ax.set_xlim(-2, (len(self.receiver) - 1) + 2)
 
@@ -2572,21 +2577,18 @@ class SeismicStream:
         if title is not None:
             fig.suptitle(self.pre)
 
-        if axes is not None:
-            return ax
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
-                plt.close()
             else:
                 fig.savefig(outfile)
-                plt.close()
+
+        if axes is not None:
+            return ax
+
         elif show:
             plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotSpectra(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot spectra"""
@@ -2622,6 +2624,7 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(3, 4))
         else:
             ax = axes
+            fig = axes.figure
 
         # fft
         u = np.fft.fft(amps)/amps.shape[1]
@@ -2633,9 +2636,10 @@ class SeismicStream:
             ui = np.abs(u[row, fids])
             norm_amps[:, row] =ui
 
-        color = plt.cm.viridis(np.linspace(0, 1, len(receiver)))
+        cmap = getattr(plt.cm, kwargs.pop('cmap', 'viridis'))
+        color = cmap(np.linspace(0, 1, len(receiver)))
         for row in range(len(receiver)):
-            ax.plot(norm_amps[:, row], freq, color=color[row],**kwargs)
+            ax.plot(norm_amps[:, row], freq, color=color[row])
         ax.xaxis.tick_top()
         ax.set_xlabel('normalized amplitudes')
         ax.xaxis.set_label_position('top')
@@ -2654,21 +2658,18 @@ class SeismicStream:
         cbar = plt.colorbar(smap, ax=ax)
         cbar.set_label('Channel Nr.')
 
-        if axes is not None:
-            return ax
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
-                plt.close()
             else:
                 fig.savefig(outfile)
-                plt.close()
+
+        if axes is not None:
+            return ax
+
         elif show:
             plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotSpectrogramComposite(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot seismogram, spectrogram and spectra"""
@@ -2677,26 +2678,24 @@ class SeismicStream:
             fig, ax = plt.subplots(1, 3, figsize=(16, 4))
         else:
             ax = axes
+            fig = axes.figure
 
         self._plotSeismogram(axes=ax[0], title=None, show=False,**kwargs)
         self._plotSpectrogram(axes=ax[1],show=False,**kwargs)
         self._plotSpectra(axes=ax[2],show=False,**kwargs)
 
-        if axes is not None:
-            return axes
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
-                plt.close()
             else:
                 fig.savefig(outfile)
-                plt.close()
+
+        if axes is not None:
+            return ax
+
         elif show:
             plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True,**kwargs):
         """plot FK image"""
@@ -2705,6 +2704,7 @@ class SeismicStream:
             fig,ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
         else:
             ax = axes
+            fig = axes.figure
 
         # transformation
         if FK_data is None:
@@ -2719,6 +2719,12 @@ class SeismicStream:
             if self.kmax is None:
                 self.kmax = np.max(kwpos[:npoints // 2])
 
+            kmax = kwargs.pop('kmax', None)
+            if kmax is None:
+                self.kmax = np.max(kwpos[:npoints // 2])
+            else:
+                self.kmax = kmax
+
             kmin = np.argmin(np.abs(kwpos - self.kmin))
             kmax = np.argmin(np.abs(kwpos - self.kmax))
 
@@ -2732,7 +2738,8 @@ class SeismicStream:
             label = "amplitudes"
 
         img = ax.imshow(abs(FK_data), aspect='auto', origin='lower',
-                           extent=[self.kmin, self.kmax, self.fmin, self.fmax])
+                           extent=[self.kmin, self.kmax, self.fmin, self.fmax],
+                           cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
         ax.set_ylabel('frequency (Hz)')
         ax.set_xlabel('wavenumber (rad/m)')
         ax.grid(linestyle=':')
@@ -2742,18 +2749,18 @@ class SeismicStream:
 
         plt.colorbar(img, label=label, ax=ax)
 
-        if axes is not None:
-            return ax
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
             else:
                 fig.savefig(outfile)
+
+        if axes is not None:
+            return ax
+
         elif show:
+            #plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotSFR(self, axes=None, st = None, amp_scale=None, outfile=None,
                         fmt=None, show=True, **kwargs):
@@ -2774,6 +2781,7 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(6, 4))
         else:
             ax = axes
+            fig = axes.figure
 
         amps = self._amps(st=st)
         amps = self._detrend_signal(amps)
@@ -2840,18 +2848,18 @@ class SeismicStream:
                               bbox_transform=ax.transAxes)
             ax.add_artist(at)
 
-        if axes is not None:
-            return ax
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
             else:
                 fig.savefig(outfile)
+
+        if axes is not None:
+            return ax
+
         elif show:
+            plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotDispersionImage(self,axes=None, outfile=None, fmt=None, show=True,
                              **kwargs):
@@ -2861,6 +2869,7 @@ class SeismicStream:
             fig,ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
         else:
             ax = axes
+            fig = axes.figure
 
         dispersive_energy = self.dispersive_energy
 
@@ -2909,18 +2918,18 @@ class SeismicStream:
         if kwargs.pop("show_cbar", True):
             plt.colorbar(img, label=label, ax=ax,orientation = 'vertical', pad = 0.01)
 
-        if axes is not None:
-            return ax
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
             else:
                 fig.savefig(outfile)
+
+        if axes is not None:
+            return ax
+
         elif show:
+            plt.tight_layout()
             plt.show()
-        else:
-            return fig
 
     def _plotDispersionImageComposite(self, axes=None, outfile=None, fmt=None, show=True,title = None,
                              **kwargs):
@@ -2942,11 +2951,11 @@ class SeismicStream:
         ax0.set_title(self.pre, fontweight='bold')
 
         # plot seismogram
-        self._plotSeismogram(axes=ax1, amp_scale=None, show = False,  **kwargs)
+        self._plotSeismogram(axes=ax1, show = False,  **kwargs)
 
         # plot dispersion image and dispersion curves
         ax2.set_title(title)
-        self._plotDispersionImage(axes=ax2,keyy='vel')
+        self._plotDispersionImage(axes=ax2,keyy='vel',**kwargs)
         if self._pick:
             for key1 in self.picks.keys():
                 for key2 in self.picks[key1].keys():
@@ -2960,17 +2969,101 @@ class SeismicStream:
         #fig.align_ylabels()
         plt.tight_layout()
 
-        if axes is not None:
-            return axes
-
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
             else:
                 fig.savefig(outfile)
+
+        if axes is not None:
+            return axes
+
         elif show:
+            plt.tight_layout()
             plt.show()
+
+    def _plotMOPA(self, data, stop=1, axes=None, outfile=None, **kwargs):
+
+        if axes is None:
+            fig,ax = plt.subplots(3, 1, figsize=(6, 6))
         else:
-            return fig
+            ax = axes
+            fig = axes.figure
 
+        cmap = kwargs.pop('cmap', 'viridis')
+        cmap_discret = getattr(plt.cm, cmap)
 
+        colors = cmap_discret(np.linspace(0, 0.9, len(np.arange(len(data)))))
+
+        for ii in np.arange(len(data)):
+
+            # amplitude
+            ax[0].scatter(data[ii]['offsets'], data[ii]['mag'],
+                                marker="o", s=15, c=colors[ii].reshape(1, -1), edgecolor='k',
+                                linewidth=0)
+
+            # fitted lines
+            ax[1].plot(data[ii]['offsets'],
+                       phase_response(data[ii]['offsets'],
+                                      data[ii]['k0'],
+                                      data[ii]['phi0']),
+                       color=colors[ii].reshape(1, -1),
+                       alpha=0.75, linewidth=0.8, linestyle='dashed')
+
+            # phase data
+            ax[1].scatter(data[ii]['offsets'],
+                                np.unwrap(data[ii]['phase'], axis=0),
+                                marker="o", s=15, c=colors[ii].reshape(1, -1),
+                                edgecolor='k',
+                                linewidth=0, zorder=2)
+
+            # dispersion curve from MOPA
+            if data[ii]['chi2'] > stop:
+                ec = 'r'
+                label = f'MOPA - chi^2 > {stop}'
+            else:
+                ec = 'k'
+                label = f'MOPA - chi^2 <= {stop}'
+
+            ax[2].scatter(data[ii]['freq'], data[ii]['vel'], marker="o", s=25, c=colors[len(colors) // 2].reshape(1, -1),
+                          edgecolor=ec, linewidth=0.8, zorder=2,
+                          label=label, alpha=0.7)
+
+        if kwargs.setdefault('showFDBFResults', True):
+            # %% dispersion curve obtained in classical sense as comparison
+            self._fdbf()
+            self.dcpicking(pck_mode='auto')
+            f_fdbf = self.picks['auto'][0]['f']
+            v_fdbf = self.picks['auto'][0]['v']
+            ax[2].scatter(f_fdbf, v_fdbf, marker="s", s=25, c='k',
+                          edgecolor='k', linewidth=0.8, zorder=-2, label='FDBF')
+
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = OrderedDict(zip(labels, handles))
+        ax[2].legend(by_label.values(), by_label.keys(), loc='upper right',
+                     frameon=True, title='Transformation')
+
+        for axi in ax.flat:
+            axi.grid(True, linestyle=':')
+
+        ax[0].set_xlabel("offset (m)")
+        ax[1].set_xlabel("offset (m)")
+        ax[0].set_ylabel(f"amplitude")
+        ax[1].set_ylabel(f"phase (rad)")
+        plot_colorBar(ax[0], self.fmin, self.fmax, label='f (Hz)', orientation='vertical', cmap=cmap)
+        plot_colorBar(ax[1], self.fmin, self.fmax, label='f (Hz)', orientation='vertical', cmap=cmap)
+
+        ax[2].set_ylabel(f"phase velocity (m/s)")
+        ax[2].set_xlabel(f"frequency (Hz)")
+        ax[2].set_ylim([self.vmin, self.vmax])
+        ax[2].set_xlim([self.fmin, self.fmax])
+        ax[0].set_title('MOPA - Shotfile: ' + self.pre, fontweight='bold')
+        fig.align_ylabels(ax)
+
+        plt.tight_layout()
+
+        if outfile:
+            fig.savefig(outfile)
+            plt.close()
+        else:
+            plt.show()

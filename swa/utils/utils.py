@@ -7,8 +7,30 @@ import numpy as np
 import pandas as pd
 
 import warnings
+import logging
 
 supported_extensions = ['.sg2','.dat','.syn','.sgy','.syn']
+
+# %% Logging
+def create_logging(name):
+    """ create logger """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+
+    # create console handler and set level to debug
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # add formatter to ch
+    ch.setFormatter(formatter)
+
+    # add ch to logger
+    logger.addHandler(ch)
+
+    return logger
 
 # %% file tools for reading/writing
 def print_inventory(dct):
@@ -322,7 +344,9 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
 
     geom = geom.sort_values(by='x')
     geom = geom.drop(columns=['id'])
-
+    geom['shot'].astype(str)
+    geom['first_geo'].astype(str)
+    geom['ngeo'].astype(str)
     geom.to_csv(path2geom, index=False, header=False)
 
 def get_fileList(path2raw):

@@ -60,10 +60,21 @@ class DispersionCurve:
 
         self.init_data(dat[:, 0], dat[:, 1], err)
 
-    def estimate_error(self,offsets=None,nchannels=24,dx=1,**kwargs):
+    def _estimate_error(self,offsets=None,nchannels=24,dx=1,**kwargs):
         """estimate error"""
         err = lorentzian_err(offsets, self.velocity, self.frequency, nchannels, dx, **kwargs)
         return err
+
+    def estimate_error(self,**kwargs):
+        """estimate error"""
+
+        err = self._estimate_error(**kwargs)
+        data = self.data.copy()
+        data['err'] = err
+
+        curve_new = DispersionCurve(self._mode, self._wave)
+        curve_new.init_data(freq=data['f'], vel=data['vr'], err=data['err'])
+        return curve_new
 
     def set(self,param, value, orig = True):
         """set a parameter"""
@@ -337,7 +348,7 @@ class DispersionCurve:
         ax.scatter(data[keyx], data[keyy], marker=marker, s=marker_size, c=color, edgecolor=color,
                    linewidth=0.8, zorder=2, label = label,alpha = alpha)
 
-        if np.sum(err) != 0:
+        if (np.sum(err) != 0) & kwargs.setdefault('showErr', False):
 
             ax.fill_between(x = data[keyx], y1 = data.vr - err, y2 =  data.vr + err, alpha = 0.2,
                             color = color, linewidth = 2, edgecolor = None, label = 'data error')
