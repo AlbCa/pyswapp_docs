@@ -2305,7 +2305,8 @@ class SeismicStream:
         """Create static plots"""
 
         if attr == 'geometry':
-            self._plotGeometry(**kwargs)
+            ax = self._plotGeometry(**kwargs)
+            return ax
         elif attr == 'seismogram':
             self._plotSeismogram(**kwargs)
         elif attr == 'spectrogram':
@@ -2330,7 +2331,7 @@ class SeismicStream:
             fig, ax = plt.subplots(figsize=(6, 2))
         else:
             ax = axes
-            fig = axes.figure
+            fig = ax.figure
 
         all_receiver = self._receiver(self._st)
 
@@ -2365,14 +2366,17 @@ class SeismicStream:
         if axes is not None:
             return ax
 
+        if show:
+            plt.tight_layout()
+            plt.show()
+
         if outfile:
             if fmt:
                 fig.savefig(outfile, format=fmt)
             else:
                 fig.savefig(outfile)
-        elif show:
-            plt.tight_layout()
-            plt.show()
+
+        return None
 
     def _plotSeismogram(self, axes=None, st = None, amp_scale=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot seismogramm of a single shot file"""
@@ -2928,7 +2932,7 @@ class SeismicStream:
             return ax
 
         elif show:
-            plt.tight_layout()
+            #plt.tight_layout()
             plt.show()
 
     def _plotDispersionImageComposite(self, axes=None, outfile=None, fmt=None, show=True,title = None,
@@ -3060,7 +3064,7 @@ class SeismicStream:
         ax[0].set_title('MOPA - Shotfile: ' + self.pre, fontweight='bold')
         fig.align_ylabels(ax)
 
-        plt.tight_layout()
+        #plt.tight_layout()
 
         if outfile:
             fig.savefig(outfile)
