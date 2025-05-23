@@ -19,20 +19,18 @@ settings = create_settings(fmin=10, fmax=50,                  # frequency range
 swam = MASW2DManager(f'{prj_dir}/proc/test_MASW2D',path2raw=path2raw,path2geom=path2geom, settings=settings)
 
 # plot data
-swam.plot_streams(attr='seismogralm', apply_to = 'all')
+swam.plot_streams(attr='seismogram', apply_to = 'cur')
 
 # set a new procset label
 swam.set_procset_label(procset)
 
-# #apply preprocessing step to the whole data (apply_to = 'all')
-# processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
-# swam.preprocess_streams(attr='trim', apply_to = 'all',by = 'offset',**processing_kwargs)
-#
-# # remove zero amplitude data
-# swam.preprocess_streams(attr='check_traces', apply_to = 'all')
-#
-# # transform data for all files (apply_to = 'all')
-# swam.transform_streams(attr='phaseshift', apply_to = 'all')
+# apply preprocessing step to the whole data (apply_to = 'all')
+processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
+swam.preprocess_streams(attr='trim', apply_to = 'cur',by = 'offset',**processing_kwargs)
+
+# reverse polarity
+swam.preprocess_streams(attr='filter', apply_to = 'cur',by = 'reverse_polarity', ids = range(10,40))
+swam.plot_streams(attr='seismogram', apply_to = 'cur')
 # #
 # # extract dispersion curves automatically for all files (apply_to = 'all')
 # # swam.extract_curves(apply_to = 'all', pck_mode='auto', auto_method = 'max')

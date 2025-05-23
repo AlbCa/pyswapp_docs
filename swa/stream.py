@@ -1026,6 +1026,9 @@ class SeismicStream:
             self._mute_traces(trace_indices)
         elif by == 'resample':
             self.resample(**kwargs)
+        elif by == 'reverse_polarity':
+            trace_indices = kwargs.setdefault('ids', [])
+            self._reverse_polarity(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -1059,6 +1062,27 @@ class SeismicStream:
                             corners = 2,
                             zerophase = True)
 
+        self._pst = st_proc
+
+    def _reverse_polarity(self, trace_indices):
+        """reverse polarity of selected traces"""
+
+        if not isinstance(trace_indices, Iterable):
+            if isinstance(trace_indices, int):
+                trace_indices = [trace_indices]
+            else:
+                raise ValueError(f'Indices should be int, list, or array-like, not {type(trace_indices)}')
+
+        if self._pst is None:
+            st_proc = self._st.copy()
+        else:
+            st_proc = self._pst.copy()
+
+        for i, trace in enumerate(st_proc):
+            if i in trace_indices:
+                st_proc[i].data *= -1
+
+        # update
         self._pst = st_proc
 
     def _mute_traces(self, trace_indices):
