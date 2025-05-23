@@ -151,6 +151,10 @@ class BaseManager:
                 self.logger.warning('Active procset label should be different from "raw". '
                                     'Setting to default label "proc1".')
 
+    def set_procset_label(self, procset = None, verbose = True):
+        """set the new active processing name"""
+        self.set_new_procset(procset , verbose)
+
     def set_loadset(self, procset = None):
         """set the loadset label"""
         if isinstance(procset,str):
@@ -509,6 +513,7 @@ class BaseManager:
         rep = self.selected_ids[1]
 
         dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
+        safe_makedirs(dir)
 
         xmids = []
         wids = self._sql.get_wids(sin, rep, procset)
@@ -838,6 +843,9 @@ class MASW2DManager(BaseManager):
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
         """process the dispersion curves"""
 
+        if procset is None:
+            procset = self._procset
+
         dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
         path2geom = os.path.join(dir, '1_geom')
         safe_makedirs(path2geom)
@@ -932,16 +940,16 @@ class MASW2DManager(BaseManager):
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_new_procset(procset)
+        # elif procset != self._procset:
+        #     self.set_new_procset(procset)
 
         color = kwargs.pop('color', 'dodgerblue')
 
         params = {'procset': "'%s'" % procset, 'dc_mode': dc_mode}
 
         if method:
-            params['method'] = "'%s'" % kwargs['method']
-            kwargs.pop('method')
+            params['method'] = "'%s'" % method
+            #kwargs.pop('method')
 
         path2cmb = os.path.join(self.prjdir, f'proc/{procset}/cmb')
         safe_makedirs(path2cmb)
@@ -982,7 +990,7 @@ class MASW2DManager(BaseManager):
         """combine dispersion curves with same receiver spread location"""
 
         if self.CC is None:
-            self.prepare_CC(procset, dc_mode, use_windows, **kwargs)
+            self.prepare_CC(self._procset, dc_mode, use_windows, **kwargs)
 
         starttime = time.time()
         print(f'Combining dispersion curves ..... ', end='')
@@ -1029,7 +1037,7 @@ class MASW2DManager(BaseManager):
             curve_data = self._sql.read_curve(params)
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            dc.plot(**kwargs)
+            #dc.plot(**kwargs)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
@@ -1052,7 +1060,7 @@ class MASW2DManager(BaseManager):
             curve_data = self._sql.read_curve(params)
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            dc.plot(**kwargs)
+            #dc.plot(**kwargs)
 
     def save_CC(self, procset=None, method = None, dc_mode=0, format='csv', **kwargs):
         """save the dispersion curves based on receiver spread midpoint"""
@@ -1064,7 +1072,7 @@ class MASW2DManager(BaseManager):
                   'method': "'%s'" % method, 'dc_mode': dc_mode}
 
         curves = self._sql.read_curve(params)
-        xmids = curves['xmid'].unique()
+        xmids = np.sort(curves['xmid'].unique())
 
         # save the receiver spread midpoints
         path2dc = os.path.join(self.prjdir, f'proc/{procset}/{method}')

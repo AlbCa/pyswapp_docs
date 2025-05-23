@@ -278,7 +278,7 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
 
         # seismic stream containing survey geometry
         stream = SeismicStream(path2shts[i])
-        stream.read_data_geom(path2shts[i], channel_nr=1001)
+        stream.read_data(path2shts[i], channel_nr=1001, extract_geometry = True)
 
         # shot parameters
         stream.set_shot_params()                    # set the shot parameters from the seismic data
@@ -306,7 +306,7 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
 
         # seismic stream containing survey geometry
         stream = SeismicStream(path2shts[i])
-        stream.read_data_geom(path2shts[i], channel_nr=1001)
+        stream.read_data(path2shts[i], channel_nr=1001, extract_geometry = True)
 
         # shot parameters
         stream.set_shot_params()                    # set the shot parameters from the seismic data
@@ -318,8 +318,7 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
         nids += ngeo
 
         sid = np.where(geom.x == source)[0]
-
-        first_geo_id = geom.id[geom.x == first_geo].item()
+        first_geo_id = int(geom.id[geom.x == first_geo].item())
         first_geo_id += 1
 
         if len(sid) > 0:
@@ -333,14 +332,17 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
                 geom.loc[sid[0],'ngeo'] += ';' + str(ngeo)
 
         else:
-            df = pd.DataFrame({'x':source,
-                               'y': 0,
-                               'z': 0,
-                               'geo': 0,
-                               'shot': sin,
-                               'first_geo': first_geo_id+1,
-                               'ngeo': ngeo})
+            tmp_dict = {'x':source,
+                       'y': 0,
+                       'z': 0,
+                       'geo': 0,
+                       'shot': sin,
+                       'first_geo': first_geo_id,
+                       'ngeo': ngeo}
+
+            df = pd.DataFrame([tmp_dict])
             geom = pd.concat([geom, df])
+            geom.reset_index(drop=True, inplace=True)
 
     geom = geom.sort_values(by='x')
     geom = geom.drop(columns=['id'])

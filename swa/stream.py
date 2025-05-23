@@ -110,7 +110,7 @@ class SeismicStream:
         self.wmove = self._settings["window_move"].item() # move increment
 
 
-    def read_data_geom(self, fname,channel_nr = 1001):
+    def read_data(self, fname, channel_nr = 1001, pre_trigger=0, extract_geometry = False):
         """
         read a shotfile and extract relevant information
 
@@ -118,16 +118,48 @@ class SeismicStream:
         ----------
         fname : str, file name
         channel_nr : int, optional
+        pre_trigger : float, optional
+        extract_geometry : bool, True if geometry should be extracted, False otherwise
         """
 
         # read and update the header of the .sg2 file
         if fname.endswith('.sg2') or fname.endswith('.dat'):
-            self._read_sg2_geom(fname,channel_nr)
+            if extract_geometry:
+                self._read_sg2_geom(fname, channel_nr)
+            else:
+                self._read_sg2(fname, channel_nr)
+
         # read and update header of the .sgy file
         elif fname.endswith('.sgy'):
-            self._read_sgy_geom(fname, channel_nr)
+            if extract_geometry:
+                self._read_sgy_geom(fname, channel_nr)
+            else:
+                self._read_sgy(fname, channel_nr)
+
+        # read and update header of synthetic data
+        elif fname.endswith('.syn') or fname.endswith('.mseed'):
+            self._read_syn(fname, channel_nr, pre_trigger)
         else:
             raise NotImplementedError("File format not supported.")
+
+    # def read_data_geom(self, fname,channel_nr = 1001):
+    #     """
+    #     read a shotfile and extract relevant information
+    #
+    #     Parameters
+    #     ----------
+    #     fname : str, file name
+    #     channel_nr : int, optional
+    #     """
+    #
+    #     # read and update the header of the .sg2 file
+    #     if fname.endswith('.sg2') or fname.endswith('.dat'):
+    #         self._read_sg2_geom(fname,channel_nr)
+    #     # read and update header of the .sgy file
+    #     elif fname.endswith('.sgy'):
+    #         self._read_sgy_geom(fname, channel_nr)
+    #     else:
+    #         raise NotImplementedError("File format not supported.")
 
     def _read_sg2_geom(self, fname, channel_nr):
         """
@@ -141,7 +173,6 @@ class SeismicStream:
 
         st_new = obspy.Stream()
         st = obspy.read(fname)
-
         for ti, trace in enumerate(st):
 
             if len(trace.stats.seg2['RECEIVER_LOCATION'].split(' ')) > 1:
@@ -197,17 +228,16 @@ class SeismicStream:
             scale = trace.stats.segy['trace_header']['scalar_to_be_applied_to_all_coordinates']
             sx_int = int(trace.stats.segy['trace_header']['source_coordinate_x'])
             sy_int = int(trace.stats.segy['trace_header']['source_coordinate_y'])
+            #sz_int = int(trace.stats.segy['trace_header']['source_coordinate_z'])
             rx_int = int(trace.stats.segy['trace_header']['group_coordinate_x'])
             ry_int = int(trace.stats.segy['trace_header']['group_coordinate_y'])
+            #rz_int = int(trace.stats.segy['trace_header']['group_coordinate_z'])
 
             if sx_int != 0:
                 sx = sx_int / abs(scale) if scale < 0 else sx_int * scale
             elif sy_int != 0:
                 sx = sy_int / abs(scale) if scale < 0 else sy_int * scale
             else:
-                warn_msg = ('Source location is missing. Provide a geometry file or edit shot file header. '
-                            'Using dummy geometry for now.')
-                self.logger.warning(warn_msg)
                 sx = 0
 
             if rx_int != 0:
@@ -215,10 +245,8 @@ class SeismicStream:
             elif ry_int != 0:
                 rx = ry_int / abs(scale) if scale < 0 else ry_int * scale
             else:
-                warn_msg = ('Receiver location is missing. Provide a geometry file or edit shot file header.'
-                            'Using dummy geometry for now.')
-                self.logger.warning(warn_msg)
-                rx = ti
+                rx = 0
+
             sn = str(trace.stats["station"])
 
             starttime = st[0].stats.starttime
@@ -243,30 +271,6 @@ class SeismicStream:
             st_new.append(trace_new)
 
         self._st = st_new
-
-    def read_data(self, fname, channel_nr = 1001, pre_trigger=0):
-        """
-        read a shotfile and extract relevant information
-
-        Parameters
-        ----------
-        fname : str, file name
-        channel_nr : int, optional
-        pre_trigger : float, optional
-        """
-
-        # read and update the header of the .sg2 file
-        if fname.endswith('.sg2') or fname.endswith('.dat'):
-            self._read_sg2(fname,channel_nr)
-        # read and update header of synthetic data
-        elif fname.endswith('.syn') or fname.endswith('.mseed'):
-            self._read_syn(fname, channel_nr, pre_trigger)
-        # read and update header of the .sgy file
-        elif fname.endswith('.sgy'):
-            self._read_sgy(fname, channel_nr)
-        else:
-            raise NotImplementedError("File format not supported.")
-
 
     def _read_sg2(self, fname, channel_nr):
         """

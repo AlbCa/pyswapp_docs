@@ -108,20 +108,20 @@ class DispersionCurve:
         return data
 
     @staticmethod
-    def _interp(x,y,xx,yerr = None, kind='cubic'):
+    def _interp(x,y,xx,yerr = None, kind='cubic',**kwargs):
         """interpolate data"""
 
-        f = interpolate.interp1d(x, y, kind=kind)
+        f = interpolate.interp1d(x, y, kind=kind, **kwargs)
         yy = f(xx)
 
         if yerr is not None:
-            ferr = interpolate.interp1d(x, yerr, kind=kind)
+            ferr = interpolate.interp1d(x, yerr, kind=kind, **kwargs)
             yyerr = ferr(xx)
             return xx,yy,yyerr
         else:
             return xx, yy, None
 
-    def resample(self, pmin, pmax, pn, pspace = 'log', param = 'f', kind = 'cubic', inplace = False):
+    def resample(self, pmin, pmax, pn, pspace = 'log', param = 'f', kind = 'cubic', inplace = False,**kwargs):
         """resample data"""
 
         data = self.data.copy()
@@ -135,7 +135,7 @@ class DispersionCurve:
             parx = data[param].values
             pary = data['vr'].values
             err = data['err'].values
-            parx_new, pary_new, err_new = self._interp(parx,pary,parx_new,yerr=err,kind = kind)
+            parx_new, pary_new, err_new = self._interp(parx,pary,parx_new,yerr=err,kind = kind,**kwargs)
 
             if param == 'lam':
                 parx_new = self._compute_frequency(parx_new, pary_new)
