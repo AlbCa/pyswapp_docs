@@ -2327,6 +2327,8 @@ class SeismicStream:
             self._plotDispersionImage(**kwargs)
         elif attr == 'dispersionImageComposite':
             self._plotDispersionImageComposite(**kwargs)
+        else:
+            self.logger.error(f'Invalid attribute "{attr}".')
 
     def _plotGeometry(self,axes=None, outfile=None, fmt=None, show=True):
         """plot acquisition setup of shot file"""

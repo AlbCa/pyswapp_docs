@@ -2,7 +2,7 @@ from swa import *
 
 # %% Create and read the geometry.csv
 
-for ext in ['sgy']:
+for ext in ['sg2']:
     # directories
     prj_dir = '../../data/real_data/AsoloL1'
     path2raw = os.path.join(prj_dir,f'raw/{ext}')
