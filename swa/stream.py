@@ -4,6 +4,7 @@ import os.path
 from collections import OrderedDict
 import numbers
 
+import numpy as np
 from scipy import signal, special
 from scipy import interpolate
 import obspy
@@ -2578,13 +2579,15 @@ class SeismicStream:
 
         color = kwargs.pop('color', 'dimgrey')
         linewidth = kwargs.pop('linewidth', 0.5)
-        title = kwargs.pop('title', self.pre)
+        title = kwargs.pop('title', f'Shotfile {self.pre}')
         step = kwargs.pop('tick_scale', 10)
         alpha = kwargs.pop('alpha',0.5)
+        show_map = kwargs.pop('show_map', False)
+        figsize = kwargs.pop('figsize',(8,8))
 
         if axes is None:
             #fig, ax = plt.subplots(figsize=(8,8),constrained_layout=True)
-            fig = Figure(figsize=(8,8), constrained_layout=True)
+            fig = Figure(figsize=figsize, constrained_layout=True)
             ax = fig.add_subplot(111)
         else:
             ax = axes
@@ -2608,7 +2611,7 @@ class SeismicStream:
         for i, pos in enumerate(self.receiver):
             amps[i] = amps[i] * amp_scale
 
-        if kwargs.setdefault('show_map', 'True'):
+        if show_map:
             ax.imshow(amps.T,
                      extent=[-1,(len(amps)-1)+1,t[-1],t[0]],
                      cmap=kwargs.pop('cmap','bwr'),
@@ -2617,6 +2620,11 @@ class SeismicStream:
                      interpolation='bicubic')
 
         for i, trace in enumerate(amps):
+
+            if not show_map:
+                ax.fill_betweenx(t[trace > 0], np.ones_like(trace[trace > 0])*i, trace[trace > 0]+i,
+                                 color=color, linewidth = 0)
+
             if ((i+1) % 5 == 0) & ((i+1) % 10 != 0):
                 ax.plot(trace+i, t, color=color, linewidth=linewidth+0.5,alpha = alpha)
             elif (i+1) % 10 == 0:
@@ -2631,12 +2639,13 @@ class SeismicStream:
 
         ax.set_xlim(-2,(len(amps)-1)+2)
 
+        offsets = self.receiver
+        xticks = np.arange(len(offsets))[step - 1::step]
+        ax.set_xticks(np.arange(len(offsets))[step - 1::step])
+
         if kwargs.pop('show_xticks',True):
 
             ax.xaxis.tick_top()
-            offsets = self.receiver
-            xticks = np.arange(len(offsets))[step-1::step]
-            ax.set_xticks(np.arange(len(offsets))[step-1::step])
             xticklabels = []
             for i in xticks:
                 xticklabels.append(f'{st[i].stats.channel}\n{offsets[i]}')
@@ -2651,11 +2660,16 @@ class SeismicStream:
                               bbox_transform=ax.transAxes)
             ax.add_artist(at)
         else:
-            ax.tick_params(
-                axis='x',
-                which='both',
-                bottom=False,
-                labelbottom=False)
+            xticklabels = []
+            for i in xticks:
+                xticklabels.append(f'{offsets[i]}')
+            ax.set_xticklabels(xticklabels)
+            ax.set_xlabel('x (m)')
+            # ax.tick_params(
+            #     axis='x',
+            #     which='both',
+            #     bottom=False,
+            #     labelbottom=False)
 
         ymin = kwargs.pop('ymin', np.min(t))
         ymax = kwargs.pop('ymax', np.max(t))

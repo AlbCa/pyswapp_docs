@@ -604,21 +604,26 @@ class BaseManager:
         self._plot(attr,procset,use_windows,**kwargs)
 
     # TODO save point list or something?
-    # TODO check error in spyder
-    def show(self, attr='', procset = None, use_windows = False):
-        """show interactive plots"""
+    def gui_interact(self, attr='', procset = None, use_windows = False):
+        """show interactive plots and interact with them"""
 
-        if attr in ['', 'seismogram', 'FK']:
-            DataSwitcher = DataSwitcherFilter
+        window_title = 'SWA - Interactive Figure Viewer'
+
+        if attr in ['', 'seismogram']:
+            DataSwitcher = DataSwitcherFilterSeis
         elif attr in ['dispersionImage', 'FV']:
             DataSwitcher = DataSwitcherPick
+        elif attr == 'FK':
+            DataSwitcher = DataSwitcherFilterFK
+
         else:
             DataSwitcher = DataSwitcherBase
 
         if use_windows:
             window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
                                         procset=procset,
-                                        procsets=self._sql.get_proc_labels())
+                                        procsets=self._sql.get_proc_labels(),
+                                        window_title=window_title)
             window.resize(800, 600)
             window.show()
 
@@ -629,9 +634,47 @@ class BaseManager:
             self.app.exec()
 
         else:
-            window = DataSwitcher(self.data, self._sql,
+            window = DataSwitcher(self.data, self._sql, plot=attr,
                                     procset = procset,
-                                    procsets = self._sql.get_proc_labels())
+                                    procsets = self._sql.get_proc_labels(),
+                                    window_title=window_title)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                #points = window.get_points()
+                pass
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        plt.close('all')
+
+    def gui_view(self, attr='', procset = None, use_windows = False):
+        """show interactive plots and swipe through them"""
+
+        window_title = 'SWA - Figure Viewer'
+        DataSwitcher = DataSwitcherBase
+
+        if use_windows:
+            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
+                                        procset=procset,
+                                        procsets=self._sql.get_proc_labels(),
+                                        window_title=window_title)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                window.clean()
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        else:
+            window = DataSwitcher(self.data, self._sql, plot=attr,
+                                    procset = procset,
+                                    procsets = self._sql.get_proc_labels(),
+                                    window_title=window_title)
             window.resize(800, 600)
             window.show()
 

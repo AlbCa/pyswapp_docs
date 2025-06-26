@@ -25,67 +25,73 @@ class StdevFunc:
         return math.sqrt(self.S / (self.k-1))
 
 # TODO problem with connection --> check at the beginning if connection exists and then safely close and reestablish it
-# TODO change persistent self._con to while for safe connect/close with spyder
+# TODO change persistent con to while for safe connect/close with spyder
 class SQL:
     """Handle an SQLite database"""
     def __init__(self, database):
 
-        self._con = None
+        #con = None
         self.database = database
-
-        self._init_connection()
+        #
+        # self._init_connection()
 
     def get_connection(self):
-        con = sqlite3.connect(self.db_path)
+        con = sqlite3.connect(self.database)
         con.create_aggregate("STDEV", 1, StdevFunc)
         return con
 
-    def _init_connection(self):
-
-        if self._con:
-            print('helllooo')
-            try:
-                self._disconnect()
-            except:
-                pass
-
-        self._connect(name=self.database)
-        self._con.create_aggregate("STDEV", 1, StdevFunc)
-
-    def _connect(self,name = 'name.db'):
-        """Create a connection to a SQL database"""
-        self._con = sqlite3.connect(name)
-
-    def _disconnect(self):
-        """Close the connection to a SQL database"""
-        self._con.close()
-        self._con = None
+    # def _init_connection(self):
+    #
+    #     if con:
+    #         print('helllooo')
+    #         try:
+    #             self._disconnect()
+    #         except:
+    #             pass
+    #
+    #     connect(name=self.database)
+    #     con.create_aggregate("STDEV", 1, StdevFunc)
+    #
+    # def _connect(self,name = 'name.db'):
+    #     """Create a connection to a SQL database"""
+    #     con = sqlite3.connect(name)
+    #
+    # def _disconnect(self):
+    #     """Close the connection to a SQL database"""
+    #     con.close()
+    #     con = None
 
     def _create_table(self, name, columns, types):
         """Create a sql table"""
 
-        ncols = len(columns)
-        ntypes = len(types)
+        with self.get_connection() as con:
 
-        if ncols != ntypes:
-            raise ValueError('Number of column names and types are not the same. %d != %d' % (ncols,ntypes))
+            ncols = len(columns)
+            ntypes = len(types)
 
-        sql = ['CREATE TABLE %s (' % name]
-        for i in range(ncols):
-            if i < (ncols-1):
-                sql.append('%s %s, ' % (columns[i], types[i]))
-            else:
-                sql.append('%s %s); ' % (columns[i], types[i]))
+            if ncols != ntypes:
+                raise ValueError('Number of column names and types are not the same. %d != %d' % (ncols,ntypes))
 
-        self._con.execute(''.join(sql))
+            sql = ['CREATE TABLE %s (' % name]
+            for i in range(ncols):
+                if i < (ncols-1):
+                    sql.append('%s %s, ' % (columns[i], types[i]))
+                else:
+                    sql.append('%s %s); ' % (columns[i], types[i]))
+
+            con.execute(''.join(sql))
 
     def to_sql(self, df, name, if_exists='fail', **kwargs):
         """Write data stored in a DataFrame to a SQL database"""
-        df.to_sql(name=name, con=self._con, if_exists=if_exists, **kwargs)
+
+        with self.get_connection() as con:
+            df.to_sql(name=name, con=con, if_exists=if_exists, **kwargs)
 
     def read_sql(self, sql):
         """Write SQL query or table into DataFrame"""
-        return pd.read_sql(sql,con=self._con)
+
+        with self.get_connection() as con:
+            return pd.read_sql(sql,con=con)
 
     def get_table(self,name):
         """Return a table form the database as DataFrame"""
@@ -93,7 +99,9 @@ class SQL:
 
     def drop_table(self, name):
         """Drop table"""
-        self._con.execute("""DROP TABLE IF EXISTS {name}""")
+
+        with self.get_connection() as con:
+            con.execute("""DROP TABLE IF EXISTS {name}""")
 
     def show_tables(self):
         """Show tables"""
@@ -108,11 +116,11 @@ class SQL:
 
     def get_tables(self):
         """Get all table names"""
-        table_names = self._con.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
 
-        table_list = [name[0] for name in table_names]
-
-        return table_list
+        with self.get_connection() as con:
+            table_names = con.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+            table_list = [name[0] for name in table_names]
+            return table_list
 
     def _append_shots_df(self, shots, geom, column_name):
         """append the shots DataFrame"""
@@ -261,19 +269,21 @@ class SQL:
     def delete_data(self,table, params):
         """delete entry from database"""
 
-        try:
-            sql = """DELETE FROM %s WHERE """ % table
-            npar = len(params)
+        with self.get_connection() as con:
 
-            for i,key in enumerate(params.keys()):
-                if i < npar-1:
-                    sql += f"{key}=={params[key]} AND "
-                else:
-                    sql += f"{key}=={params[key]}"
-            self._con.execute(sql)
+            try:
+                sql = """DELETE FROM %s WHERE """ % table
+                npar = len(params)
 
-        except sqlite3.OperationalError:
-            pass
+                for i,key in enumerate(params.keys()):
+                    if i < npar-1:
+                        sql += f"{key}=={params[key]} AND "
+                    else:
+                        sql += f"{key}=={params[key]}"
+                con.execute(sql)
+
+            except sqlite3.OperationalError:
+                pass
 
     def dublicate_data(self,data, sin, rep, wid=-1):
 
@@ -325,8 +335,6 @@ class SQL:
         amps_df.insert(1, 'wid', wid)
         amps_df.insert(2, 'sin', sin)
         amps_df.insert(3, 'rep', rep)
-
-
 
         df = pd.concat([df, amps_df])
 
