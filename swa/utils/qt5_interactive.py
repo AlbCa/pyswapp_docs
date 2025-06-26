@@ -522,7 +522,7 @@ class DataSwitcherPick(DataSwitcherBase):
             for dc_mode in picks.keys():
                 dc = {
                     'xmid': self.stream.midpoint,
-                    'method': self.stream.extraction_method,
+                    'method': self.method,
                     'dc_mode': dc_mode,
                     'f': picks[dc_mode]['f'],
                     'v': picks[dc_mode]['v'],

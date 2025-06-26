@@ -664,7 +664,6 @@ class BaseManager:
             DataSwitcher = DataSwitcherPick
         elif attr == 'FK':
             DataSwitcher = DataSwitcherFilterFK
-
         else:
             DataSwitcher = DataSwitcherBase
 
@@ -758,16 +757,21 @@ class BaseManager:
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
                           'sin': sin, 'rep': rep, 'wid': wid}
                 curve_data = self._sql.read_curve(params)
-                dc = DispersionCurve()
-                dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                dc.plot(**kwargs)
+
+                if not curve_data.empty:
+                    dc = DispersionCurve()
+                    dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+                    dc.plot(**kwargs)
         else:
             params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
                       'sin': sin, 'rep': rep, 'wid': -1}
             curve_data = self._sql.read_curve(params)
-            dc = DispersionCurve()
-            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            dc.plot(**kwargs)
+
+            if not curve_data.empty:
+
+                dc = DispersionCurve()
+                dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+                dc.plot(**kwargs)
 
     def plot_curves(self, procset = None, method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False,**kwargs):

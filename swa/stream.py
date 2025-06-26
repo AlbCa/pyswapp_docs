@@ -1116,74 +1116,77 @@ class SeismicStream:
         # update
         self._pst = st_proc
 
-    def _mute(self, tapering='mild', **kwargs):
-        """
-        interactive linear muting
-
-        Parameters
-        ----------
-        tapering : str, taper strength
-        """
-
-        if self._pst is None:
-            st_proc = self._st.copy()
-        else:
-            st_proc = self._pst.copy()
-        self._st_backup_mute = st_proc.copy()
-
-        # repetition for left and right side muting
-        terminate = False
-        count = 0
-
-        while terminate is False:
-
-            fig, ax = plt.subplots(figsize=(8, 5))
-            self._plotSeismogram(axes=ax, amp_scale=1, show = False, **kwargs)
-
-            text = '\n'.join((
-                r'$\bf{Keyboard \quad commands:}$',
-                r'Press $\bf{t}$ for top or $\bf{b}$ for bottom mute.',
-                r'Press $\bf{v}$ to estimate the velocity.',
-                r'Press $\bf{enter}$ to refresh.',
-                r'Press $\bf{crtl+z}$ to reset last step. Press $\bf{r}$ to reset.',
-                r'Press $\bf{e}$ to stop the process.'))
-            at = AnchoredText(text,
-                               loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.15),
-                       bbox_transform=ax.transAxes
-                       )
-            ax.add_artist(at)
-
-            plot = SeismoInteractive(ax,receiver=self.receiver)
-            ax.set_title(f'Top mute active', fontweight='bold')
-            plt.tight_layout()
-            plt.show()
-
-            # extract points from points_list
-            points = []
-            if len(plot.points) > 0:
-                x, y = zip(*sorted(plot.points.items()))
-                for i in range(len(x)):
-                    points.append((x[i], y[i]))
-
-            key = plot.key
-            reset = plot.reset
-            reset_last = plot.reset_last
-            terminate = plot.terminate
-
-            if reset:
-                self._reset_mute()
-                count = 0
-
-            if reset_last:
-                self._reset_mute_last()
-                count -= 1
-
-            elif terminate is False and (not reset) and (not reset_last):
-                if len(points) > 0:
-                    self._linear_mute(points,key, tapering=tapering)
-                    count += 1
-                else:
-                    terminate= True
+    # #################
+    # DEPRECATED !!!
+    # def _mute(self, tapering='mild', **kwargs):
+    #     """
+    #     interactive linear muting
+    #
+    #     Parameters
+    #     ----------
+    #     tapering : str, taper strength
+    #     """
+    #
+    #     if self._pst is None:
+    #         st_proc = self._st.copy()
+    #     else:
+    #         st_proc = self._pst.copy()
+    #     self._st_backup_mute = st_proc.copy()
+    #
+    #     # repetition for left and right side muting
+    #     terminate = False
+    #     count = 0
+    #
+    #     while terminate is False:
+    #
+    #         fig, ax = plt.subplots(figsize=(8, 5))
+    #         self._plotSeismogram(axes=ax, amp_scale=1, show = False, **kwargs)
+    #
+    #         text = '\n'.join((
+    #             r'$\bf{Keyboard \quad commands:}$',
+    #             r'Press $\bf{t}$ for top or $\bf{b}$ for bottom mute.',
+    #             r'Press $\bf{v}$ to estimate the velocity.',
+    #             r'Press $\bf{enter}$ to refresh.',
+    #             r'Press $\bf{crtl+z}$ to reset last step. Press $\bf{r}$ to reset.',
+    #             r'Press $\bf{e}$ to stop the process.'))
+    #         at = AnchoredText(text,
+    #                            loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.15),
+    #                    bbox_transform=ax.transAxes
+    #                    )
+    #         ax.add_artist(at)
+    #
+    #         plot = SeismoInteractive(ax,receiver=self.receiver)
+    #         ax.set_title(f'Top mute active', fontweight='bold')
+    #         plt.tight_layout()
+    #         plt.show()
+    #
+    #         # extract points from points_list
+    #         points = []
+    #         if len(plot.points) > 0:
+    #             x, y = zip(*sorted(plot.points.items()))
+    #             for i in range(len(x)):
+    #                 points.append((x[i], y[i]))
+    #
+    #         key = plot.key
+    #         reset = plot.reset
+    #         reset_last = plot.reset_last
+    #         terminate = plot.terminate
+    #
+    #         if reset:
+    #             self._reset_mute()
+    #             count = 0
+    #
+    #         if reset_last:
+    #             self._reset_mute_last()
+    #             count -= 1
+    #
+    #         elif terminate is False and (not reset) and (not reset_last):
+    #             if len(points) > 0:
+    #                 self._linear_mute(points,key, tapering=tapering)
+    #                 count += 1
+    #             else:
+    #                 terminate= True
+    # #################
 
     def _linear_mute(self, points,key='t', **kwargs):
         """
@@ -1485,17 +1488,6 @@ class SeismicStream:
     def fk_filter_from_pick_ui(self, points, key = 't', **kwargs):
         """apply fk filter from picking boundaries"""
 
-        # transformation
-        # if self.FK_data:
-        #     FK_abs  = self.FK_data['FK_abs']
-        #     theta = self.FK_data['theta']
-        #     kw = self.FK_data['kw']
-        #     freq = self.FK_data['freq']
-        #     iX = self.FK_data['iX']
-        #     iT = self.FK_data['iT']
-        # else:
-        #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
-        #     self._add_fk_data_to_dict(FK_abs, theta, kw, freq, iX, iT)
         FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
 
         npoints = FK_abs.shape[1]
@@ -1565,142 +1557,142 @@ class SeismicStream:
         """Reset FK filter"""
         self._pst = self._st.copy()
 
-    #################
-    # DEPRECATED!!!!!
-    def _fk_filter_from_pick(self, fname=None, show=False, **kwargs):
-        """apply fk filter by picking boundaries"""
-
-        # transformation
-        FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
-
-        npoints = FK_abs.shape[1]
-
-        fpos = freq[:npoints // 2]
-        df = fpos[1] - fpos[0]
-        fmin = np.argmin(np.abs(fpos - self.fmin))
-        fmax = np.argmin(np.abs(fpos - self.fmax))
-
-        # kwpos = np.linspace(0, np.max(kw), npoints)
-        kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-
-        if self.kmax is None:
-            self.kmax = np.max(kwpos[:npoints // 2])
-
-        kmin = np.argmin(np.abs(kwpos - self.kmin))
-        kmax = np.argmin(np.abs(kwpos - self.kmax))
-        #kmax = np.max(kwpos[:npoints // 2])
-
-        # tapering function
-        taper_func = getattr(signal.windows, 'hann')
-        taper_len = int(kwargs.pop('taper_length', 5) // df)
-        taper_win = taper_func(2 * taper_len)
-
-        FK_abs_filt = FK_abs.copy()
-
-        terminate = False
-        while terminate == False:
-
-            # fig, ax = plt.subplots(2, figsize=(6, 4))
-            fig = plt.figure(figsize=(8, 5), constrained_layout=True)
-            gs = fig.add_gridspec(5, 2)
-            ax0 = fig.add_subplot(gs[0, 0:2])
-            ax1 = fig.add_subplot(gs[1:5, 0:2])
-
-            self._plotGeometry(axes=ax0,show=False)
-            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax1, **kwargs)  # xlimit=np.max(kwpos[:npoints//2]))
-            text = '\n'.join((
-                r'$\bf{Keyboard \quad commands:}$',
-                r'Press $\bf{e}$ to stop the process.',
-                r'Press $\bf{t}$ for top or $\bf{b}$ for bottom filter.'))
-            at = AnchoredText(text,
-                              loc='lower right', prop=dict(size=6), frameon=True, bbox_to_anchor=(1, 1.05),
-                              bbox_transform=ax1.transAxes
-                              )
-            ax1.add_artist(at)
-
-            plot = FKFilterInteractive(ax1)
-
-            ax1.set_title(f'Top filter active', fontweight='bold')
-            #plt.tight_layout()
-            plt.show()
-
-            terminate = plot.terminate
-            key = plot.key
-
-            points = []
-            if len(plot.points) > 0:
-                x, y = zip(*sorted(plot.points.items()))
-                for i in range(len(x)):
-                    points.append((x[i], y[i]))
-
-                fp = np.array([np.round(points[i][1], 4) for i in range(len(points))])
-                kp = np.array([np.round(points[i][0], 4) for i in range(len(points))])
-
-                # write to file
-                if fname is not None:
-
-                    path, _ = os.path.split(self.fname)
-                    safe_makedirs(path)
-
-                    if os.path.isfile(fname):
-                        warn_msg = 'File already exists. Fk filter will be appended.'
-                        self.logger.warning(warn_msg)
-
-                    file = open(fname, "a+")
-                    file.write(f'{self.pre}\t{key}\t{len(fp)}\n')
-                    for i in range(len(fp)):
-                        file.write(f'{kp[i]}\t{fp[i]}\n')
-
-            # apply filter
-            if not terminate:
-                if len(points) > 0:
-
-                    f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
-                    kpp = f(fpos)
-
-                    if key == 't':
-                        window = np.zeros_like(FK_abs_filt[0, :])
-                        for j in range(len(fpos)):
-                            k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                            window[k_min_tmp:] = 1
-                            if k_min_tmp > taper_len - 1:
-                                window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
-                            else:
-                                window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
-
-                            FK_abs_filt[j, :] *= window
-                            window *= 0
-
-                    if key == 'b':
-                        window = np.ones_like(FK_abs_filt[0, :])
-                        for j in range(len(fpos)):
-                            k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                            window[k_min_tmp:] = 0
-                            if k_min_tmp < len(kwpos) - taper_len:
-                                window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
-                            else:
-                                window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
-
-                            FK_abs_filt[j, :] *= window
-                            window = np.ones_like(FK_abs_filt[0, :])
-
-        # back transformation
-        FK_filt = FK_abs_filt * np.exp(1j * theta)
-        FK_filt = np.fft.ifftshift(FK_filt, axes=1)
-        FK_filt[:,:npoints // 2] = 0
-        amps = self._fk_backtransform(FK_filt, iT, iX)
-        self._amps2st(amps)
-
-        if show:
-            fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-            self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
-            self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
-            ax[0].set_title('Raw data', fontweight='bold')
-            ax[1].set_title('Post fk filter', fontweight='bold')
-            plt.tight_layout()
-            plt.show()
-
-    #################
+    # #################
+    # # DEPRECATED!!!!!
+    # def _fk_filter_from_pick(self, fname=None, show=False, **kwargs):
+    #     """apply fk filter by picking boundaries"""
+    #
+    #     # transformation
+    #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
+    #
+    #     npoints = FK_abs.shape[1]
+    #
+    #     fpos = freq[:npoints // 2]
+    #     df = fpos[1] - fpos[0]
+    #     fmin = np.argmin(np.abs(fpos - self.fmin))
+    #     fmax = np.argmin(np.abs(fpos - self.fmax))
+    #
+    #     # kwpos = np.linspace(0, np.max(kw), npoints)
+    #     kwpos = np.linspace(0, 2 * np.max(kw), npoints)
+    #
+    #     if self.kmax is None:
+    #         self.kmax = np.max(kwpos[:npoints // 2])
+    #
+    #     kmin = np.argmin(np.abs(kwpos - self.kmin))
+    #     kmax = np.argmin(np.abs(kwpos - self.kmax))
+    #     #kmax = np.max(kwpos[:npoints // 2])
+    #
+    #     # tapering function
+    #     taper_func = getattr(signal.windows, 'hann')
+    #     taper_len = int(kwargs.pop('taper_length', 5) // df)
+    #     taper_win = taper_func(2 * taper_len)
+    #
+    #     FK_abs_filt = FK_abs.copy()
+    #
+    #     terminate = False
+    #     while terminate == False:
+    #
+    #         # fig, ax = plt.subplots(2, figsize=(6, 4))
+    #         fig = plt.figure(figsize=(8, 5), constrained_layout=True)
+    #         gs = fig.add_gridspec(5, 2)
+    #         ax0 = fig.add_subplot(gs[0, 0:2])
+    #         ax1 = fig.add_subplot(gs[1:5, 0:2])
+    #
+    #         self._plotGeometry(axes=ax0,show=False)
+    #         self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax1, **kwargs)  # xlimit=np.max(kwpos[:npoints//2]))
+    #         text = '\n'.join((
+    #             r'$\bf{Keyboard \quad commands:}$',
+    #             r'Press $\bf{e}$ to stop the process.',
+    #             r'Press $\bf{t}$ for top or $\bf{b}$ for bottom filter.'))
+    #         at = AnchoredText(text,
+    #                           loc='lower right', prop=dict(size=6), frameon=True, bbox_to_anchor=(1, 1.05),
+    #                           bbox_transform=ax1.transAxes
+    #                           )
+    #         ax1.add_artist(at)
+    #
+    #         plot = FKFilterInteractive(ax1)
+    #
+    #         ax1.set_title(f'Top filter active', fontweight='bold')
+    #         #plt.tight_layout()
+    #         plt.show()
+    #
+    #         terminate = plot.terminate
+    #         key = plot.key
+    #
+    #         points = []
+    #         if len(plot.points) > 0:
+    #             x, y = zip(*sorted(plot.points.items()))
+    #             for i in range(len(x)):
+    #                 points.append((x[i], y[i]))
+    #
+    #             fp = np.array([np.round(points[i][1], 4) for i in range(len(points))])
+    #             kp = np.array([np.round(points[i][0], 4) for i in range(len(points))])
+    #
+    #             # write to file
+    #             if fname is not None:
+    #
+    #                 path, _ = os.path.split(self.fname)
+    #                 safe_makedirs(path)
+    #
+    #                 if os.path.isfile(fname):
+    #                     warn_msg = 'File already exists. Fk filter will be appended.'
+    #                     self.logger.warning(warn_msg)
+    #
+    #                 file = open(fname, "a+")
+    #                 file.write(f'{self.pre}\t{key}\t{len(fp)}\n')
+    #                 for i in range(len(fp)):
+    #                     file.write(f'{kp[i]}\t{fp[i]}\n')
+    #
+    #         # apply filter
+    #         if not terminate:
+    #             if len(points) > 0:
+    #
+    #                 f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
+    #                 kpp = f(fpos)
+    #
+    #                 if key == 't':
+    #                     window = np.zeros_like(FK_abs_filt[0, :])
+    #                     for j in range(len(fpos)):
+    #                         k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+    #                         window[k_min_tmp:] = 1
+    #                         if k_min_tmp > taper_len - 1:
+    #                             window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
+    #                         else:
+    #                             window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
+    #
+    #                         FK_abs_filt[j, :] *= window
+    #                         window *= 0
+    #
+    #                 if key == 'b':
+    #                     window = np.ones_like(FK_abs_filt[0, :])
+    #                     for j in range(len(fpos)):
+    #                         k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+    #                         window[k_min_tmp:] = 0
+    #                         if k_min_tmp < len(kwpos) - taper_len:
+    #                             window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
+    #                         else:
+    #                             window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
+    #
+    #                         FK_abs_filt[j, :] *= window
+    #                         window = np.ones_like(FK_abs_filt[0, :])
+    #
+    #     # back transformation
+    #     FK_filt = FK_abs_filt * np.exp(1j * theta)
+    #     FK_filt = np.fft.ifftshift(FK_filt, axes=1)
+    #     FK_filt[:,:npoints // 2] = 0
+    #     amps = self._fk_backtransform(FK_filt, iT, iX)
+    #     self._amps2st(amps)
+    #
+    #     if show:
+    #         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+    #         self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
+    #         self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
+    #         ax[0].set_title('Raw data', fontweight='bold')
+    #         ax[1].set_title('Post fk filter', fontweight='bold')
+    #         plt.tight_layout()
+    #         plt.show()
+    #
+    # #################
 
     def _fk_filter_from_file(self, fname=None, show=False, **kwargs):
         """apply the fk filter based on a file containing the bounds"""
@@ -2178,12 +2170,12 @@ class SeismicStream:
 
         return phase_diff, fids, freqs[fids]
 
-    def dcpicking(self, pck_mode = 'auto', auto_method = 'max', axes=None, **kwargs):
+    def dcpicking(self, pck_mode = 'auto', auto_method = 'max', **kwargs):
         """automatic or interactive dispersion curve picking"""
 
-        receiver = self.receiver
-        source = self.source
-        offsets = self._aoffsets(receiver,source)
+        # receiver = self.receiver
+        # source = self.source
+        # offsets = self._aoffsets(receiver,source)
 
         if pck_mode == 'auto':
             # Automatic dispersion curve extraction
@@ -2206,76 +2198,80 @@ class SeismicStream:
             else:
                 raise NotImplementedError
 
-        elif pck_mode == 'manual':
-
-            self.extraction_method = self.trafo_type
-
-            # interactive dispersion curve picking by selection of boundary boxes
-            if axes is None:
-                fig = plt.figure(figsize=(16, 9), constrained_layout=True)
-                gs = fig.add_gridspec(5, 2)
-                ax0 = fig.add_subplot(gs[0, 0:2])
-                ax1 = fig.add_subplot(gs[1:5, 0:2])
-            else:
-                ax0 = axes[0]
-                ax1 = axes[1]
-
-            if 'title' in kwargs:
-                title = kwargs.pop('title', None)
-                ax0.set_title(self.pre.replace('_',' ') + f" - xmid = {title} m", fontweight='bold')
-            else:
-                ax0.set_title(self.pre.replace('_', ' '), fontweight='bold')
-            self._plotGeometry(axes = ax0)
-
-            # plot dispersion image
-            text = '\n'.join((
-                r'$\bf{Keyboard \quad commands:}$',
-                r'Press $\bf{e}$ to stop the process.',
-                r'Press any number to set dc index.',
-                r'Press $\bf{d}$ to delete boundary.',
-                r'Press $\bf{p}$ to pick a dc.',
-                r'Press $\bf{r}$ to reset picks.',
-                r'Scroll $\bf{up}$ to tighten and $\bf{down}$ to loosen boundary.'))
-            at = AnchoredText(text,
-                               loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.),
-                       bbox_transform=ax1.transAxes)
-            ax1.add_artist(at)
-            self._plotDispersionImage(axes=ax1, **kwargs)
-
-            ax1.set_title(f"Dispersion curve picking", fontweight="bold")
-
-            # show picked dc curves for same xmid location
-            if 'dc_prior' in kwargs:
-                dc_fnames = kwargs['dc_prior']
-                for i in range(len(dc_fnames)):
-                    curve = DispersionCurve()
-                    curve.read(dc_fnames[i])
-                    curve.plot(axes=ax1,
-                                  color='r',
-                                  alpha = 0.1,
-                                  size = 10,
-                                  axis_style = False,
-                                  marker = '.',
-                                  show_orig=False)
-
-            # pick polygons
-            dcpicker = DCPickingInteractive(ax1,self.frequency, self.velocity,
-                                            self.dispersive_energy, offsets = offsets)
-            plt.show()
-
-            # retrieve picks
-            picks = dcpicker.picks
-
-            if len(picks) != 0:
-                self.picks[pck_mode] = picks
-                self._pick = True
-
-            else:
-                self._pick = False
+        # #################
+        # # DEPRECATED!!!!!
+        # elif pck_mode == 'manual':
+        #
+        #     self.extraction_method = self.trafo_type
+        #
+        #     # interactive dispersion curve picking by selection of boundary boxes
+        #     if axes is None:
+        #         fig = plt.figure(figsize=(16, 9), constrained_layout=True)
+        #         gs = fig.add_gridspec(5, 2)
+        #         ax0 = fig.add_subplot(gs[0, 0:2])
+        #         ax1 = fig.add_subplot(gs[1:5, 0:2])
+        #     else:
+        #         ax0 = axes[0]
+        #         ax1 = axes[1]
+        #
+        #     if 'title' in kwargs:
+        #         title = kwargs.pop('title', None)
+        #         ax0.set_title(self.pre.replace('_',' ') + f" - xmid = {title} m", fontweight='bold')
+        #     else:
+        #         ax0.set_title(self.pre.replace('_', ' '), fontweight='bold')
+        #     ax0 = self._plotGeometry(axes = ax0, show = False)
+        #
+        #     # plot dispersion image
+        #     text = '\n'.join((
+        #         r'$\bf{Keyboard \quad commands:}$',
+        #         r'Press $\bf{e}$ to stop the process.',
+        #         r'Press any number to set dc index.',
+        #         r'Press $\bf{d}$ to delete boundary.',
+        #         r'Press $\bf{p}$ to pick a dc.',
+        #         r'Press $\bf{r}$ to reset picks.',
+        #         r'Scroll $\bf{up}$ to tighten and $\bf{down}$ to loosen boundary.'))
+        #     at = AnchoredText(text,
+        #                        loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.),
+        #                bbox_transform=ax1.transAxes)
+        #     ax1.add_artist(at)
+        #     ax1 = self._plotDispersionImage(axes=ax1, show = False, **kwargs)
+        #
+        #     ax1.set_title(f"Dispersion curve picking", fontweight="bold")
+        #
+        #     # show picked dc curves for same xmid location
+        #     if 'dc_prior' in kwargs:
+        #         dc_fnames = kwargs['dc_prior']
+        #         for i in range(len(dc_fnames)):
+        #             curve = DispersionCurve()
+        #             curve.read(dc_fnames[i])
+        #             curve.plot(axes=ax1,
+        #                           color='r',
+        #                           alpha = 0.1,
+        #                           size = 10,
+        #                           axis_style = False,
+        #                           marker = '.',
+        #                           show_orig=False)
+        #
+        #     # pick polygons
+        #     dcpicker = DCPickingInteractive(ax1,self.frequency, self.velocity,
+        #                                     self.dispersive_energy, offsets = offsets)
+        #     plt.show()
+        #
+        #     # retrieve picks
+        #     picks = dcpicker.picks
+        #
+        #     if len(picks) != 0:
+        #         self.picks[pck_mode] = picks
+        #         self._pick = True
+        #
+        #     else:
+        #         self._pick = False
+        # #################
 
         else:
-            raise ValueError(f'Picking mode not recognized. Use one of the keys: {["auto","manual"]} \n '
-                             f'for automatic or manual dispersion curve picking, respectively.')
+            raise ValueError(f'Picking mode not recognized. Use one of the key: "auto" \n '
+                             f'for automatic dispersion curve extraction. \n'
+                             f'Use the gui for manual dispersion curve picking.')
 
 
     # %% WINDOWING
@@ -2557,11 +2553,11 @@ class SeismicStream:
         ax.spines['left'].set_visible(False)
         ax.spines['bottom'].set_linewidth(1)
 
-        if show:
-            plt.show()
-
         if axes is not None:
             return ax
+
+        if show:
+            plt.show()
 
         if outfile:
             if fmt:
@@ -3016,7 +3012,7 @@ class SeismicStream:
         return None
 
     def _plotSFR(self, axes=None, st = None, amp_scale=None, outfile=None,
-                        fmt=None, show=True, gui = True, **kwargs):
+                        fmt=None, show=True, gui = False, **kwargs):
         """plot swept-frequency record (SFR)"""
 
         figsize = kwargs.pop('figsize', (8, 8))
@@ -3122,7 +3118,7 @@ class SeismicStream:
         return fig
 
     def _plotDispersionImage(self,axes=None, outfile=None, fmt=None, show=True,
-                             gui = True, **kwargs):
+                             gui = False, **kwargs):
         """plot dispersion image"""
 
         figsize = kwargs.pop('figsize', (8, 8))
@@ -3137,6 +3133,11 @@ class SeismicStream:
             fig = ax.figure
 
         dispersive_energy = self.dispersive_energy
+
+        if self.dispersive_energy is None:
+            self.logger.error('Dispersion image cannot be displayed, '
+                              'because wavefield transformation not yet performed.')
+            return None
 
         if self.norm_power:
             # work around
