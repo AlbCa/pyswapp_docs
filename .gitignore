@@ -2,4 +2,5 @@ swa/__pycache__/*.pyc
 swa/utils/__pycache__/*.pyc
 examples/figures/*
 data/proc/*
+data/*
 data/syn_data/proc/*
