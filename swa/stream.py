@@ -2478,10 +2478,11 @@ class SeismicStream:
         else:
             self.logger.error(f'Invalid attribute "{attr}".')
 
-    def _plotGeomShort(self,axes=None):
+    def _plotGeomShort(self):
         """plot acquisition setup of shot file"""
 
-        fig, ax = plt.subplots(figsize=(8, 4))
+        fig = Figure(figsize=(8, 4), constrained_layout=True)
+        ax = fig.add_subplot(111)
 
         all_receiver = self._receiver(self._st)
         ax.scatter(all_receiver, np.zeros(len(all_receiver)), marker='v', c='k',label='active channels',alpha = 0.7)
@@ -2512,13 +2513,16 @@ class SeismicStream:
 
         return fig
 
-    def _plotGeometry(self,axes=None, outfile=None, fmt=None, show=True):
+    def _plotGeometry(self,axes=None, outfile=None, fmt=None, show=True, gui = False,**kwargs):
         """plot acquisition setup of shot file"""
 
+        figsize = kwargs.pop('figsize', (8, 4))
         if axes is None:
-            #fig, ax = plt.subplots(figsize=(8, 4))
-            fig = Figure(figsize=(8,4), constrained_layout=True)
-            ax = fig.add_subplot(111)
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         else:
             ax = axes
             fig = ax.figure
@@ -2553,12 +2557,11 @@ class SeismicStream:
         ax.spines['left'].set_visible(False)
         ax.spines['bottom'].set_linewidth(1)
 
+        if show:
+            plt.show()
+
         if axes is not None:
             return ax
-
-        if show:
-            #plt.tight_layout()
-            plt.show()
 
         if outfile:
             if fmt:
@@ -2568,8 +2571,20 @@ class SeismicStream:
 
         return fig
 
-    def _plotSeismogram(self, axes=None, st = None, amp_scale=None, outfile=None, fmt=None, show=True, **kwargs):
+    def _plotSeismogram(self, axes=None, st = None, amp_scale=None, outfile=None,
+                        fmt=None, show=True, gui = False, **kwargs):
         """plot seismogramm of a single shot file"""
+
+        figsize = kwargs.pop('figsize', (8, 8))
+        if axes is None:
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        else:
+            ax = axes
+            fig = ax.figure
 
         if st is None:
             if self._pst is None:
@@ -2583,15 +2598,6 @@ class SeismicStream:
         step = kwargs.pop('tick_scale', 10)
         alpha = kwargs.pop('alpha',0.5)
         show_map = kwargs.pop('show_map', False)
-        figsize = kwargs.pop('figsize',(8,8))
-
-        if axes is None:
-            #fig, ax = plt.subplots(figsize=(8,8),constrained_layout=True)
-            fig = Figure(figsize=figsize, constrained_layout=True)
-            ax = fig.add_subplot(111)
-        else:
-            ax = axes
-            fig = axes.figure
 
         amps = self._amps(st=st)
         amps = self._detrend_signal(amps)
@@ -2622,7 +2628,11 @@ class SeismicStream:
         for i, trace in enumerate(amps):
 
             if not show_map:
-                ax.fill_betweenx(t[trace > 0], np.ones_like(trace[trace > 0])*i, trace[trace > 0]+i,
+
+                tmp_trace = copy.deepcopy(trace)
+                tmp_trace[trace <= 0] = 0
+
+                ax.fill_betweenx(t, np.ones_like(tmp_trace)*i, tmp_trace+i,
                                  color=color, linewidth = 0)
 
             if ((i+1) % 5 == 0) & ((i+1) % 10 != 0):
@@ -2678,8 +2688,8 @@ class SeismicStream:
         ax.grid(axis='y', linestyle=":")
         ax.invert_yaxis()
 
-        # if axes is not None:
-        #     return ax
+        if axes is not None:
+            return ax
 
         if outfile:
             if fmt:
@@ -2692,8 +2702,19 @@ class SeismicStream:
 
         return fig
 
-    def _plotSpectrogram(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
+    def _plotSpectrogram(self, axes=None, outfile=None, fmt=None, show=True, gui = False, **kwargs):
         """plot spectrogram"""
+
+        figsize = kwargs.pop('figsize', (8, 8))
+        if axes is None:
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        else:
+            ax = axes
+            fig = ax.figure
 
         if self._pst is None:
             st = self._st.copy()
@@ -2744,14 +2765,6 @@ class SeismicStream:
 
         abs_amps_min = round(np.percentile(abs_amps,5))
         abs_amps_max = round(np.percentile(abs_amps, 95))
-
-        if axes is None:
-            #fig, ax = plt.subplots(figsize=(8,8))
-            fig = Figure(figsize=(8,8), constrained_layout=True)
-            ax = fig.add_subplot(111)
-        else:
-            ax = axes
-            fig = axes.figure
 
         title = kwargs.pop('title', None)
 
@@ -2806,8 +2819,19 @@ class SeismicStream:
 
         return fig
 
-    def _plotSpectra(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
+    def _plotSpectra(self, axes=None, outfile=None, fmt=None, show=True, gui = False, **kwargs):
         """plot spectra"""
+
+        figsize = kwargs.pop('figsize', (8, 8))
+        if axes is None:
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        else:
+            ax = axes
+            fig = ax.figure
 
         if self._pst is None:
             st = self._st.copy()
@@ -2835,14 +2859,6 @@ class SeismicStream:
         max_id = np.argmin(np.abs(freq - self.fmax))
         fids = np.arange(min_id, max_id + 1, step=self.fstep)
         freq = freq[fids]
-
-        if axes is None:
-            #fig, ax = plt.subplots(figsize=(8,8))
-            fig = Figure(figsize=(8,8), constrained_layout=True)
-            ax = fig.add_subplot(111)
-        else:
-            ax = axes
-            fig = axes.figure
 
         # fft
         u = np.fft.fft(amps)/amps.shape[1]
@@ -2895,12 +2911,12 @@ class SeismicStream:
         """plot seismogram, spectrogram and spectra"""
 
         if axes is None:
-            #fig, ax = plt.subplots(1, 3, figsize=(16, 4))
-            fig = Figure(figsize=(16,4), constrained_layout=True)
-            ax0 = fig.add_subplot(1, 3, 1)
-            ax1 = fig.add_subplot(1, 3, 2)
-            ax2 = fig.add_subplot(1, 3, 3)
-            ax = [ax0,ax1,ax2]
+            fig, ax = plt.subplots(1, 3, figsize=(16, 4))
+            # fig = Figure(figsize=(16,4), constrained_layout=True)
+            # ax0 = fig.add_subplot(1, 3, 1)
+            # ax1 = fig.add_subplot(1, 3, 2)
+            # ax2 = fig.add_subplot(1, 3, 3)
+            # ax = [ax0,ax1,ax2]
         else:
             ax = axes
             fig = axes.figure
@@ -2924,16 +2940,19 @@ class SeismicStream:
 
         return fig
 
-    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True,**kwargs):
+    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True, gui = False, **kwargs):
         """plot FK image"""
 
+        figsize = kwargs.pop('figsize', (8, 8))
         if axes is None:
-            #fig,ax = plt.subplots(figsize=(8,8), constrained_layout=True)
-            fig = Figure(figsize=(8,8), constrained_layout=True)
-            ax = fig.add_subplot(111)
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         else:
             ax = axes
-            fig = axes.figure
+            fig = ax.figure
 
         # transformation
         if FK_data is None:
@@ -2997,8 +3016,19 @@ class SeismicStream:
         return None
 
     def _plotSFR(self, axes=None, st = None, amp_scale=None, outfile=None,
-                        fmt=None, show=True, **kwargs):
+                        fmt=None, show=True, gui = True, **kwargs):
         """plot swept-frequency record (SFR)"""
+
+        figsize = kwargs.pop('figsize', (8, 8))
+        if axes is None:
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        else:
+            ax = axes
+            fig = ax.figure
 
         if st is None:
             if self._pst is None:
@@ -3010,14 +3040,6 @@ class SeismicStream:
         linewidth = kwargs.pop('linewidth', 0.5)
         scale = kwargs.pop('scale', 1)
         alpha = kwargs.pop('alpha',0.5)
-
-        if axes is None:
-            #fig, ax = plt.subplots(figsize=(8,8))
-            fig = Figure(figsize=(8,8), constrained_layout=True)
-            ax = fig.add_subplot(111)
-        else:
-            ax = axes
-            fig = axes.figure
 
         amps = self._amps(st=st)
         amps = self._detrend_signal(amps)
@@ -3100,16 +3122,19 @@ class SeismicStream:
         return fig
 
     def _plotDispersionImage(self,axes=None, outfile=None, fmt=None, show=True,
-                             **kwargs):
+                             gui = True, **kwargs):
         """plot dispersion image"""
 
+        figsize = kwargs.pop('figsize', (8, 8))
         if axes is None:
-            #fig,ax = plt.subplots(figsize=(8,8), constrained_layout=True)
-            fig = Figure(figsize=(8,8), constrained_layout=True)
-            ax = fig.add_subplot(111)
+            if gui:
+                fig = Figure(figsize=figsize, constrained_layout=True)
+                ax = fig.add_subplot(111)
+            else:
+                fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
         else:
             ax = axes
-            fig = axes.figure
+            fig = ax.figure
 
         dispersive_energy = self.dispersive_energy
 

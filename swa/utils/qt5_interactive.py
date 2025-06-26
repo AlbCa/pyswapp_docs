@@ -208,7 +208,7 @@ class DataSwitcherBase(QWidget):
             self.data_exists = self.data_exists & FV_flag
 
         if self.data_exists:
-            return self.stream.plot(plot, show=False, **self.kwargs, **kwargs)
+            return self.stream.plot(plot, show=False, gui = True, **self.kwargs, **kwargs)
 
         return None
 

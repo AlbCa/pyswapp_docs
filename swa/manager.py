@@ -28,13 +28,13 @@ from .curves import CombineCurves
 # TODO: simplify the use of different methods [check]
 # TODO: load/save curves: add function to load a curve set!!
 # TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
-# TODO: read geometry with general file name!
+# TODO: read geometry with general file name! [check]
 # TODO: change settings midprocessing
 # TODO: better way to work with windowing data??
 # TODO: plotting issues when plotting windowing data as curve
 # TODO: flip polarity [check]
 # TODO: check what is happening with roll-along data
-# TODO: improve set up of project
+# TODO: improve set up of project [check]
 
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
@@ -71,6 +71,7 @@ class BaseManager:
         else:
             self._create_project(**kwargs)
 
+    # TODO: check if file has preferred filename style?
     def _create_project(self,**kwargs):
         """Create the project directory and database"""
 
@@ -82,7 +83,7 @@ class BaseManager:
         if (len(os.listdir(os.path.join(self.prjdir,'01_data/raw'))) == 0):
             if (self.path2raw is not None):
 
-                rename = kwargs.pop('rename', True)
+                rename = kwargs.pop('rename', False)
                 print('Copying and renaming raw data into project directory ..... ' , end="")
                 starttime = time.time()
                 _, self.ext = get_fileList(self.path2raw)
@@ -154,6 +155,7 @@ class BaseManager:
         self._sql = SQL(database=self.path2db)
             
         #self._sql.read_setting(self.settings)
+        # load settings
         self.settings = self._sql.get_table('settings')
         # self._sql.show_tables()
 
@@ -638,7 +640,7 @@ class BaseManager:
                 window_axes.append(fig)
             return window_axes, wids
         else:
-            ax = stream.plot(attr, **kwargs)
+            ax = stream.plot(attr, show=True, **kwargs)
             return ax
 
     def plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
@@ -648,6 +650,11 @@ class BaseManager:
     # TODO save point list or something?
     def gui_interact(self, attr='', procset = None, use_windows = False):
         """show interactive plots and interact with them"""
+
+        if attr not in ['geometry','geom','seismogram','','spectrogram',
+                        'spectra','spectrogramComposite','FK','SFR','dispersionImage','FV']:
+            self.logger.error(f'AttributeError: {attr} does not exist.')
+            pass
 
         window_title = 'SWA - Interactive Figure Viewer'
 
@@ -694,6 +701,11 @@ class BaseManager:
 
     def gui_view(self, attr='', procset = None, use_windows = False):
         """show interactive plots and swipe through them"""
+
+        if attr not in ['geometry','geom','seismogram','','spectrogram',
+                        'spectra','spectrogramComposite','FK','SFR','dispersionImage','FV']:
+            self.logger.error(f'AttributeError: {attr} does not exist.')
+            pass
 
         window_title = 'SWA - Figure Viewer'
         DataSwitcher = DataSwitcherBase
@@ -834,7 +846,7 @@ class BaseManager:
 
 
 class MASW2DManager(BaseManager):
-    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db'):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db',**kwargs):
         """
         MASW 2D manager class for surface wave analysis
 
@@ -847,7 +859,7 @@ class MASW2DManager(BaseManager):
         database : str, name of the database
         """
 
-        super().__init__(prjdir, path2raw, path2geom, settings, database)
+        super().__init__(prjdir, path2raw, path2geom, settings, database,**kwargs)
         self.CC = None
 
     def plot_streams(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
@@ -1298,7 +1310,7 @@ class MASW2DManager(BaseManager):
 
 
 class Tomo2DManager(BaseManager):
-    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db'):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db',**kwargs):
         """
         Manager to run the tomographic-like approach from Barone et al. (2019)
 
@@ -1310,7 +1322,7 @@ class Tomo2DManager(BaseManager):
         settings : DataFrame, settings for the processing and visualisation
         database : str, name of the database
         """
-        super().__init__(prjdir, path2raw, path2geom, settings, database)
+        super().__init__(prjdir, path2raw, path2geom, settings, database,**kwargs)
 
     def plot_streams(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """Plot the stream data"""

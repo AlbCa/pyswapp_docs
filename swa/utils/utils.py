@@ -34,8 +34,6 @@ def create_logging(name):
     return logger
 
 
-# TODO set up project dir
-# [data[raw,rename],geom,proc]
 def create_projectdir(prjdir = ''):
     """create project directory"""
 
@@ -45,7 +43,7 @@ def create_projectdir(prjdir = ''):
 
 
 def rename_files(path2raw, extension = '.sg2', prjdir = '', channel_nr = 1000, rename = False):
-    """rename file for easier handling of geometry"""
+    """copy & optionally rename file for easier handling of geometry"""
 
     if not '.' in extension:
         extension = '.' + extension
@@ -60,10 +58,12 @@ def rename_files(path2raw, extension = '.sg2', prjdir = '', channel_nr = 1000, r
     # Copy and rename the copied file
     for fname_old,fname_new in zip(original,renamed):
         #path, name = os.path.split(fname)
-        shutil.copy(os.path.join(path2raw,fname_old), os.path.join(prjdir,f'01_data/raw/{fname_old}'))
+        shutil.copy(os.path.join(path2raw,fname_old),
+                    os.path.join(prjdir,f'01_data/raw/{fname_old}'))
 
         if rename:
-            shutil.move(os.path.join(prjdir,f'01_data/raw/{fname_old}'), os.path.join(prjdir,f'01_data/raw/{fname_new}'))
+            shutil.move(os.path.join(prjdir,f'01_data/raw/{fname_old}'),
+                        os.path.join(prjdir,f'01_data/raw/{fname_new}'))
 
 
 # %% file tools for reading/writing
@@ -122,45 +122,6 @@ def save2csv(outfile, freq, vel, err):
                  vel[line],
                  err[line]))
     f.close()
-
-# %% helper function to read geometry file
-def read_geometry(geometry):
-    """read adapted formikoj geometry files"""
-
-    geom = pd.read_csv(geometry,delimiter=',',header=None)
-    geom = np.asarray(geom)
-
-    receiver_coordinates = geom[geom[:,3]==1,0:3]
-    source_coordinates = geom[geom[:, 4] != '-1',0:3]
-    shots = geom[geom[:, 4] != '-1', 4]
-    first_geos = geom[geom[:, 4] != '-1', -2]
-    ngeos = geom[geom[:, 4] != '-1', -1]
-
-    shot_files = []
-    receivers_per_shot = []
-    for i in range(len(shots)):
-        sn = shots[i].split(';')
-        fg = first_geos[i].split(';')
-        ng = ngeos[i].split(';')
-
-        if (len(sn) != len(fg)) & (len(sn) != len(ng)):
-            raise ValueError
-
-        shot_files.append(sn)
-
-        tmp = []
-        for j in range(len(sn)):
-            rec = receiver_coordinates[int(fg[j])-1:int(fg[j])-1+int(ng[j])]
-
-            if int(ng[j]) != len(rec):
-                warnings.warn(f'Number of channels ({int(ng[j])}) and '
-                      f'actual receiver count ({len(rec)}) not matching!')
-
-            tmp.append(rec)
-
-        receivers_per_shot.append(tmp)
-
-    return shot_files, source_coordinates, receivers_per_shot
 
 def get_shotfiles_from_geometry(path2raw, shot_files, extension = '.sg2', sort_ascending = True):
     """get the paths to the shot files from the geometry.csv file"""
