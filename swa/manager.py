@@ -153,7 +153,7 @@ class BaseManager:
         print('Loading project:')
         self._sql = SQL(database=self.path2db)
             
-        self._sql.read_setting(self.settings)
+        #self._sql.read_setting(self.settings)
         self.settings = self._sql.get_table('settings')
         # self._sql.show_tables()
 
@@ -834,7 +834,7 @@ class BaseManager:
 
 
 class MASW2DManager(BaseManager):
-    def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db'):
         """
         MASW 2D manager class for surface wave analysis
 
@@ -1298,7 +1298,7 @@ class MASW2DManager(BaseManager):
 
 
 class Tomo2DManager(BaseManager):
-    def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db'):
         """
         Manager to run the tomographic-like approach from Barone et al. (2019)
 
