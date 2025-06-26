@@ -1,0 +1,604 @@
+import copy
+from .utils import *
+from .interactive import *
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
+                             QLabel, QComboBox)
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
+# TODO fail safe for selecting transformation method [check]
+# TODO dual view to process windows and whole set (plot geometry on top?) [check]
+# TODO create link between selected procset and windowing plots [check]
+# TODO filtering in seismogram [done]
+# TODO deactivate interaction when viewing raw
+# TODO save picks??
+# TODO spyder close event
+
+class DualFigureSwitcher(QMainWindow):
+    def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None, procsets = None):
+        super().__init__()
+        self.setWindowTitle("SWA Viewer")
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QHBoxLayout()
+        central_widget.setLayout(layout)
+
+        if not DataSwitcher:
+            DataSwitcher = DataSwitcherBase
+
+        # Viewer 1: controls the index
+        self.viewer1 = DataSwitcherBase(data, sql, plot = plot, procset = procset, procsets = procsets)
+        self.viewer1.setFixedSize(450, 600)
+
+        # Viewer 2: shows groups of figures based on viewer1's index
+        self.viewer2 = DataSwitcher(data, sql, plot = plot, use_windows=True, procset = procset, procsets = procsets)
+        self.viewer2.setFixedSize(800, 600)
+
+        layout.addWidget(self.viewer1)
+        layout.addWidget(self.viewer2)
+
+        # Link left to right
+        self.viewer1.index_changed.connect(self.viewer2.set_group)
+        self.viewer1.procset_changed.connect(self.viewer2.load_procset)
+
+    def clean(self):
+        self.viewer1.clean()
+        self.viewer2.clean()
+        
+    def closeEvent(self, event):
+        self.viewer1.closeEvent(event)
+        self.viewer2.closeEvent(event)
+
+class DataSwitcherBase(QWidget):
+    index_changed = pyqtSignal(int)
+    procset_changed = pyqtSignal(str)
+
+    def __init__(self, data, sql, plot = 'seismogram', use_windows=False, interaction_class=None,
+                 procset = None, procsets = None, btn_label = 'Click me', **kwargs):
+        super().__init__()
+
+        self.logger = create_logging(name='QApp')
+
+        self.data = data
+        self.plot = plot
+        self.stream = None
+        self.canvas0 = FigureCanvas()
+        self.canvas = FigureCanvas()
+
+        self.setWindowTitle("SWA Viewer")
+        self._sql = sql
+
+        self.active_label = 'PLOT INACTIVE'
+
+        # remove raw from processing ???
+        if interaction_class:
+            procsets = list(procsets)
+            procsets.remove('raw')
+            self.active_label = 'PLOT ACTIVE'
+
+        if procsets is None:
+            raise ValueError("procsets must not be empty")
+
+        self.procsets = procsets
+        if procset not in procsets:
+            procset = procsets[-1]
+        self.procset = procset
+
+        self.is_grouped = use_windows
+        self.all_labels = self.create_labels()
+        self.interaction_class = interaction_class
+
+        self.group_index = 0
+        self.current_index = 0
+        self.interactor = None
+        self.points = {}
+        self.picks = {}
+
+        self.grouped_methods = {}
+        for procset in procsets:
+            self.grouped_methods[procset] = list(sql.get_trafo_labels(procset))
+        self.methods = self.grouped_methods[procset]
+
+        if not self.methods:
+            self.method = "phaseshift"
+        else:
+            self.method = self.methods[0]
+
+        self.labels = self._get_current_labels()
+        self.btn_label = btn_label
+
+        # self.method = kwargs.setdefault('method', 'phaseshift')
+
+        self.kwargs = kwargs
+
+        self.init_ui()
+        self.update_display()
+        self.canvas.setFocus()
+
+    # data base interaction
+    def _write_data(self, data, sin, rep, procset, wid=-1):
+        """write processed data to database"""
+        self._sql.write_data(data, sin, rep, procset, wid)
+
+    def _write_FV(self, data, sin, rep, procset, wid=-1):
+        """write FV to database"""
+        self._sql.write_FV(data, sin, rep, procset, wid)
+
+    def _get_data(self, sin, rep, procset, wid=-1):
+        """get processed data from database"""
+        par, amps, recs, sht = self._sql.read_data(sin, rep, procset=procset, wid=wid)
+        return par, amps, recs, sht
+
+    def _get_FV(self, sin, rep, procset, wid=-1, method='phaseshift'):
+        """get FV data from database"""
+        vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
+        return vel, kw, freq, FV
+
+    def _set_data(self, data, sin, rep, procset, wid=-1):
+        """set processed data from database to current stream"""
+
+        par, amps, recs, sht = self._get_data(sin, rep, procset=procset, wid=wid)
+        amps_ari = amps.values.transpose()
+        if not amps.empty:
+            data.update_pst(amps_ari, sht, recs, par)
+            return True
+        else:
+            #self.logger.warning('No data.')
+            return False
+
+    def _set_FV(self, data, sin, rep, procset, wid=-1, method='phaseshift'):
+        """set FV data from database to current stream"""
+
+        vel, kw, freq, FV = self._get_FV(sin, rep, procset=procset, wid=wid, method=method)
+        if FV is not None:
+            data.update_FV(method, vel, kw, freq, FV)
+        else:
+            self.logger.warning(f'Wave-field transformation not yet performed. Running {method} transformation.')
+            data.transform(method = method)
+            self._write_FV(data, sin, rep, procset, wid=wid)
+            self.update_display()
+        return True
+
+    # data selection
+    def create_labels(self):
+
+        labels = []
+
+        if self.is_grouped:
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+                    wids = self._sql.get_wids(sin, rep, self.procset)
+                    labels.append([[sin,rep,x] for x in wids])
+        else:
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+                    labels.append([sin,rep,-1])
+
+        return labels
+
+    def select_data(self, sin=1, rep=1):
+        """Select one stream object based on source location and shot repetition indices"""
+
+        if sin in self.data.keys():
+            if rep in self.data[sin].keys():
+                return self.data[sin][rep]
+
+        return None
+
+    def create_figure(self, plot = None, **kwargs):
+        """plot portions of the stream data"""
+
+        if not self.labels:
+            return None
+
+        if not plot:
+            plot = self.plot
+
+        label = self.labels[self.current_index]
+
+        self.stream = self.select_data(label[0],label[1])
+        self.data_exists = self._set_data(self.stream, label[0],label[1], self.procset, label[2])
+
+        if plot in ['dispersionImage', 'dispersionImageComposite', 'FV', 'FVComposite']:
+            FV_flag = self._set_FV(self.stream, label[0],label[1], self.procset, method=self.method, wid=label[2])
+            self.data_exists = self.data_exists & FV_flag
+
+        if self.data_exists:
+            return self.stream.plot(plot, show=False, **kwargs)
+
+        return None
+
+    def _get_current_labels(self):
+        return self.all_labels if not self.is_grouped else self.all_labels[self.group_index]
+
+    def add_combobox(self, label, sets, set):
+        dropdown_label = QLabel(label)
+        dropdown_label.setStyleSheet("font-size: 14px; color: gray;")
+        combo = QComboBox()
+        combo.addItems(sets)
+        combo.setFixedSize(90, 40)
+        if len(sets) > 0:
+            try:
+                combo.setCurrentIndex(list(sets).index(set))
+            except ValueError:
+                combo.setCurrentIndex(sets[0])
+
+        return dropdown_label, combo
+
+    def init_ui(self):
+        self.layout = QVBoxLayout(self)
+
+        # Navigation bar
+        self.nav_layout = QHBoxLayout()
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        self.left_btn.setFixedSize(40, 40)
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        self.right_btn.setFixedSize(40, 40)
+
+        if not self.is_grouped and self.procset is not None:
+            # Dropdown menu to select procset
+            self.dropdown_label, self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.load_procset)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        # Interaction buttons
+        if self.interaction_class:
+            self.interact_btn = QPushButton(self.btn_label)
+            self.interact_btn.setFixedSize(100, 40)
+
+        self.nav_layout.addWidget(self.left_btn)
+        self.nav_layout.addWidget(self.right_btn)
+
+        if not self.is_grouped and self.procset is not None:
+            self.nav_layout.addWidget(self.dropdown_label)
+            self.nav_layout.addWidget(self.combo)
+
+        if self.interaction_class:
+            self.nav_layout.addWidget(self.interact_btn)
+
+        self.nav_layout.addStretch()
+        self.nav_layout.addWidget(self.label)
+
+        self.layout.addLayout(self.nav_layout)
+
+        self.left_btn.clicked.connect(self.show_previous_figure)
+        self.right_btn.clicked.connect(self.show_next_figure)
+
+        if self.interaction_class:
+            self.interact_btn.clicked.connect(self.interact)
+
+        # Canvas
+        if self.labels:
+            figure0 = self.create_figure(plot = 'geomShort')
+            #figure0.tight_layout()
+            self.canvas0 = FigureCanvas(figure0)
+            self.canvas0.setFocusPolicy(Qt.StrongFocus)
+            self.canvas0.setFocus()
+
+            figure = self.create_figure()
+            self.canvas = FigureCanvas(figure)
+            self.canvas.setFocusPolicy(Qt.StrongFocus)
+            self.canvas.setFocus()
+        #else:
+        #    self.canvas0 = FigureCanvas()
+        #    self.canvas = FigureCanvas()
+
+        self.layout.addWidget(self.canvas0)
+        self.layout.addWidget(self.canvas)
+
+    def show_previous_figure(self):
+        if not self.labels:
+            return
+        self.current_index = (self.current_index - 1) % len(self.labels)
+        self.update_display()
+        self.canvas.setFocus()
+        if not self.is_grouped:
+            self.index_changed.emit(self.current_index)
+
+    def show_next_figure(self):
+        if not self.labels:
+            return
+        self.current_index = (self.current_index + 1) % len(self.labels)
+        self.update_display()
+        self.canvas.setFocus()
+        if not self.is_grouped:
+            self.index_changed.emit(self.current_index)
+
+    def interact(self):
+        return None
+
+    def update_display(self):
+
+        # add points from previous session to next plot
+        if self.interactor:
+            if self.interactor.points:
+                self.points[self.current_index] = self.interactor.points
+
+        # enable/disable navigation buttons
+        num_figures = len(self.labels)
+        is_navigation_enabled = num_figures > 1
+        self.left_btn.setEnabled(is_navigation_enabled)
+        self.right_btn.setEnabled(is_navigation_enabled)
+
+        figure0 = self.create_figure(plot='geomShort')
+        figure = self.create_figure()
+
+        #figure0.tight_layout()
+        if not figure0:
+            self.label.setText("No data")
+
+            placeholder = QWidget()
+            placeholder.setFixedSize(self.canvas0.size())
+            self.layout.replaceWidget(self.canvas0, placeholder)
+            self.canvas0.setParent(None)
+            self.canvas0.deleteLater()
+            self.canvas0 = placeholder
+
+            placeholder = QWidget()
+            placeholder.setFixedSize(self.canvas.size())
+            self.layout.replaceWidget(self.canvas, placeholder)
+            self.canvas.setParent(None)
+            self.canvas.deleteLater()
+            self.canvas = placeholder
+
+            return
+
+        # update label
+        if not self.is_grouped:
+            label = self.labels[self.current_index]
+            self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
+        else:
+            label = self.labels[self.current_index]
+            self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
+
+        self.layout.removeWidget(self.canvas0)
+        self.canvas0.setParent(None)
+        self.canvas0.deleteLater()
+        self.canvas0 = FigureCanvas(figure0)
+        self.layout.addWidget(self.canvas0)
+
+        # Replace canvas
+        self.layout.removeWidget(self.canvas)
+        self.canvas.setParent(None)
+        self.canvas.deleteLater()
+        self.canvas = FigureCanvas(figure)
+        self.canvas.setFocusPolicy(Qt.StrongFocus)
+        self.canvas.setFocus()
+        self.canvas.setEnabled(self.data_exists)
+        self.layout.addWidget(self.canvas)
+
+        # Setup interaction
+        self.interactor = None
+        if (self.interaction_class is not None) and self.data_exists:
+
+            ax = figure.axes[0]
+            points = self.points.get(self.current_index, {})
+            picks = self.picks.get(self.current_index, {})
+
+            self.interactor = self.interaction_class(ax, points=points, data = self.stream, picks = picks, **self.kwargs)
+
+            #if self.interactor.picks:
+            self.points[self.current_index] = self.interactor.points
+            self.picks[self.current_index] = self.interactor.picks
+
+    def set_group(self, group_index):
+        """Used when figures are grouped (e.g., in a multi-view setup)."""
+        if not self.is_grouped or group_index >= len(self.all_labels):
+            return
+
+        self.group_index = group_index
+        self.current_index = 0
+        self.labels = self._get_current_labels()
+        self.update_display()
+        self.canvas.setFocus()
+
+    def load_procset(self, procset):
+        self.procset = procset
+        self.procset_changed.emit(procset)
+        self.update_display()
+
+    def clean(self):
+        pass
+    
+    def closeEvent(self, event):
+        
+        if hasattr(self, 'canvas'):
+            self.canvas.setParent(None)
+            self.canvas.close()
+            del self.canvas
+        event.accept()
+        plt.close('all')
+
+class DataSwitcherPick(DataSwitcherBase):
+
+    def __init__(self, data, sql, plot = 'FV', use_windows=False,
+                 procset = None, procsets = None, **kwargs):
+
+        interaction_class = DCPickingInteractive
+
+        super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
+                 procset = procset, procsets = procsets, btn_label = 'Extract Curve', **kwargs)
+
+
+    def init_ui(self):
+        self.layout = QVBoxLayout(self)
+
+        # Navigation bar
+        self.nav_layout = QHBoxLayout()
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        self.left_btn.setFixedSize(40, 40)
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        self.right_btn.setFixedSize(40, 40)
+
+        if not self.is_grouped and self.procset is not None:
+            # Dropdown menu to select procset
+            self.dropdown_label, self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.load_procset)
+
+        if self.procset is not None:
+            self.dropdown_label2, self.combo2 = self.add_combobox("METHOD:", self.methods, self.method)
+            self.combo2.currentTextChanged.connect(self.load_method)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        # Interaction buttons
+        if self.interaction_class:
+            self.interact_btn = QPushButton(self.btn_label)
+            self.interact_btn.setFixedSize(100, 40)
+
+        self.nav_layout.addWidget(self.left_btn)
+        self.nav_layout.addWidget(self.right_btn)
+
+        if not self.is_grouped and self.procset is not None:
+            self.nav_layout.addWidget(self.dropdown_label)
+            self.nav_layout.addWidget(self.combo)
+
+        if self.procset is not None:
+            self.nav_layout.addWidget(self.dropdown_label2)
+            self.nav_layout.addWidget(self.combo2)
+
+        if self.interaction_class:
+            self.nav_layout.addWidget(self.interact_btn)
+
+        self.nav_layout.addStretch()
+        self.nav_layout.addWidget(self.label)
+
+        self.layout.addLayout(self.nav_layout)
+
+        self.left_btn.clicked.connect(self.show_previous_figure)
+        self.right_btn.clicked.connect(self.show_next_figure)
+
+        if self.interaction_class:
+            self.interact_btn.clicked.connect(self.interact)
+
+        # Canvas
+        if self.labels:
+            figure0 = self.create_figure(plot = 'geomShort')
+            #figure0.tight_layout()
+            self.canvas0 = FigureCanvas(figure0)
+            self.canvas0.setFocusPolicy(Qt.StrongFocus)
+            self.canvas0.setFocus()
+
+            figure = self.create_figure()
+            self.canvas = FigureCanvas(figure)
+            self.canvas.setFocusPolicy(Qt.StrongFocus)
+            self.canvas.setFocus()
+        else:
+            self.canvas0 = FigureCanvas()
+            self.canvas = FigureCanvas()
+
+        self.layout.addWidget(self.canvas0)
+        self.layout.addWidget(self.canvas)
+
+    def interact(self):
+        if self.interactor:
+            self.canvas.setFocus()
+            self.interactor.interact()
+            self.picks[self.current_index] = self.interactor.picks
+            self.update_display()
+            self.canvas.setFocus()
+
+            self.write_data_to_sql()
+
+    def write_data_to_sql(self):
+
+        label = self.labels[self.current_index]
+
+        if isinstance(type(self.interactor).picks, property):
+
+            picks = self.picks[self.current_index]
+
+            for dc_mode in picks.keys():
+                dc = {
+                    'xmid': self.stream.midpoint,
+                    'method': self.stream.extraction_method,
+                    'dc_mode': dc_mode,
+                    'f': picks[dc_mode]['f'],
+                    'v': picks[dc_mode]['v'],
+                    'err': np.zeros(len(picks[dc_mode]['v']))}
+
+                self._sql.write_curve(dc, label[0], label[1],
+                                      procset=self.procset,
+                                      wid=label[2],
+                                      xmid = self.stream.midpoint)
+
+    # TODO error when switching back to raw (exclude raw??)
+    #def load_procset(self, procset):
+
+      #  self.methods = list(self.grouped_methods).index(self.procset)
+
+       # self.procset = procset
+       # self.current_index = 0
+       # self.update_display()
+
+    def load_method(self, method):
+
+        self.method = method
+        self.update_display()
+
+    # def closeEvent(self, event):
+    #     # Disconnect any signals that use the canvas
+    #     self.interact_btn.disconnect()
+    #     self.left_btn.disconnect()
+    #     self.right_btn.disconnect()
+    #     # Clean up canvas explicitly if needed
+    #     self.canvas.setParent(None)
+    #     self.canvas.deleteLater()
+    #     super().closeEvent(event)
+
+
+class DataSwitcherFilter(DataSwitcherBase):
+
+    def __init__(self, data, sql, plot = '', use_windows=False,
+                 procset=None, procsets=None, **kwargs):
+
+        if plot == 'FK':
+            interaction_class = FKFilterInteractive
+        elif plot == '':
+            interaction_class = SeismoInteractive
+        else:
+            raise NotImplementedError
+
+        super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
+                 procset = procset, procsets = procsets, btn_label='Filter | Reset', **kwargs)
+
+    # TODO there is probably a much better way than this ....
+    def interact(self):
+        """filter data based on FK plot"""
+        if self.interactor:
+            self.canvas.setFocus()
+
+            points = self.points[self.current_index]
+            label = self.labels[self.current_index]
+
+            self._sql.dublicate_data(self.stream, label[0], label[1], label[2])
+
+            # filter data
+            if points:
+                stream = self.interactor.filter()
+                self.points[self.current_index] = {}
+            # reset
+            else:
+                stream = copy.deepcopy(self.stream) #self.select_data(label[0], label[1])
+                self._set_data(stream, label[0], label[1], 'tmp', label[2])
+
+            self._write_data(stream, label[0], label[1], self.procset, label[2])
+
+            self.update_display()
+            self.canvas.setFocus()
+
+    # remove dublicates
+    def clean(self):
+        for table in self._sql.get_tables():
+            self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})

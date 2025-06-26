@@ -10,23 +10,31 @@ from .stream import SeismicStream
 from .curve import DispersionCurve
 from .curves import CombineCurves
 
+# TODO
+# 1. Project directory
+# 1.1 Set up project directory
+# 1.1.1 - read and rename seismic data
+# 1.1.2 - create geometry if possible otherwise request geometry
+# 1.1.3 - error handling of all input files
+
 # TODO: test on field data
 # TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
 # --> change warnings to logging!
-# TODO: dynamic/static plotting!!!
+# TODO: dynamic/static plotting [check]
 # TODO: documentation!!!
 # TODO: keep copy of raw dispersion curves before filtering [check]
 # TODO: CURVE & PROCSET
-# TODO: simplify the use of the procsets
-# TODO: simplify the use of different methods!!
+# TODO: simplify the use of the procsets [check] ?
+# TODO: simplify the use of different methods [check]
 # TODO: load/save curves: add function to load a curve set!!
 # TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
 # TODO: read geometry with general file name!
 # TODO: change settings midprocessing
 # TODO: better way to work with windowing data??
 # TODO: plotting issues when plotting windowing data as curve
-# TODO: flip polarity
+# TODO: flip polarity [check]
 # TODO: check what is happening with roll-along data
+# TODO: improve set up of project
 
 class BaseManager:
     def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
@@ -43,6 +51,7 @@ class BaseManager:
         """
 
         self.logger = create_logging(name='Manager')
+        self.app = QApplication(sys.argv)
 
         self.prjdir = prjdir
         self.path2raw = path2raw
@@ -85,6 +94,7 @@ class BaseManager:
         self._sql.read_setting(self.settings)
 
         # seismic data
+        self.create = True
         self._read_data()
 
         print('\nExisting procsets:', *self._sql.get_proc_labels())
@@ -100,28 +110,32 @@ class BaseManager:
 
         print('Loading project:')
         self._sql = SQL(database=self.path2db)
+            
+        self._sql.read_setting(self.settings)
         self.settings = self._sql.get_table('settings')
         # self._sql.show_tables()
+
+        self.create = False
         self._read_data()
 
-        prc_sets = self._sql.get_proc_labels()
-        print('\nExisting procsets:', *prc_sets)
+        for table in self._sql.get_tables():
+            self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})
 
         # set/load procset label
-        if 'amps' in self._sql.get_tables():
-            if len(prc_sets) > 1:
-                self.set_new_procset(procset=prc_sets[-1])
-            else:
-                self.set_new_procset(procset='proc1')
+        prc_sets = self._sql.get_proc_labels()
+
+        if len(prc_sets) > 1:
+            self.set_new_procset(procset=prc_sets[-1])
         else:
             self.set_new_procset(procset='proc1')
 
+        print('\nExisting procsets:', *prc_sets)
+
         # load processed data
-        if 'amps' in self._sql.get_tables():
-            if len(prc_sets) > 1:
-                self.load_procset(prc_sets[-1])
-            else:
-                self.load_procset('raw')
+        if len(prc_sets) > 1:
+            self.load_procset(prc_sets[-1])
+        else:
+            self.load_procset('raw')
 
         print('')
 
@@ -235,6 +249,9 @@ class BaseManager:
                 if sin in self.data.keys():
                     if rep in self.data[sin].keys():
                         self._write_data(self.data[sin][rep], sin, rep, 'raw')
+
+                        if self.create:
+                            self._write_data(self.data[sin][rep], sin, rep, 'proc1')
             else:
                 raise FileNotFoundError
 
@@ -308,7 +325,7 @@ class BaseManager:
         else:
             raise KeyError(f'The key sin = {sin} does not exist.')
 
-    def preprocess(self, attr, procset=None, use_windows = False, **kwargs):
+    def _preprocess(self, attr, procset=None, use_windows = False, **kwargs):
         """apply preprocessing steps to current selection or all data sets"""
 
         if procset is None:
@@ -333,8 +350,11 @@ class BaseManager:
             self.data[sin][rep] = stream
             self._write_data(stream, sin, rep, procset, wid = -1)
 
+    def preprocess(self, attr, procset=None, use_windows = False, **kwargs):
+        """apply preprocessing steps to current selection or all data sets"""
+        self._preprocess(attr, procset, use_windows, **kwargs)
 
-    def transform(self, method, procset=None, use_windows = False, **kwargs):
+    def _transform(self, method, procset=None, use_windows = False, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
 
         if procset is None:
@@ -357,7 +377,11 @@ class BaseManager:
             self.data[sin][rep] = stream
             self._write_FV(stream, sin, rep, procset, wid = -1)
 
-    def _extract(self, stream, pck_mode, sin, rep, procset, wid, method, **kwargs):
+    def transform(self, method, procset=None, use_windows=False, **kwargs):
+        """apply wavefield transformation to current selection or all data sets"""
+        self._transform(method, procset, use_windows, **kwargs)
+
+    def _extract_dc(self, stream, pck_mode, sin, rep, procset, wid, method, **kwargs):
         """extract a dispersion curve and write to database"""
 
         try:
@@ -386,7 +410,7 @@ class BaseManager:
 
                 self._sql.write_curve(dc, sin, rep, procset, wid, xmid)
 
-    def extract(self, procset=None, use_windows = False, method = None, pck_mode='auto', **kwargs):
+    def _extract(self, procset=None, use_windows = False, method = None, pck_mode='auto', **kwargs):
         """apply dispersion curve picking to a stream"""
 
         if procset is None:
@@ -403,7 +427,7 @@ class BaseManager:
                 self._set_data(tmp, sin, rep, procset, wid)
                 FV_exists = self._set_FV(tmp, sin, rep, self._procset, wid, method=method)
                 if (method == 'MOPA') or (method != 'MOPA' and FV_exists):
-                    self._extract(tmp,pck_mode, sin = sin, rep = rep, wid = wid, procset=procset,
+                    self._extract_dc(tmp,pck_mode, sin = sin, rep = rep, wid = wid, procset=procset,
                                   method = method, **kwargs)
                 else:
                     self.logger.error(f'No wavefield-transformation for ({sin},{rep}) for picking.')
@@ -412,10 +436,14 @@ class BaseManager:
             FV_exists = self._set_FV(stream, sin, rep, procset=procset, method=method)
 
             if (method == 'MOPA') or (method != 'MOPA' and FV_exists):
-                self._extract(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset,
+                self._extract_dc(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset,
                               method = method, **kwargs)
             else:
                 self.logger.error(f'No wavefield-transformation for ({sin},{rep}) for picking.')
+
+    def extract(self, procset=None, use_windows=False, method=None, pck_mode='auto', **kwargs):
+        """apply dispersion curve picking to a stream"""
+        self._extract(procset, use_windows, method, pck_mode, **kwargs)
 
     def _process_curve(self, attr, params, method = None,
                        procset = None, **kwargs):
@@ -489,7 +517,7 @@ class BaseManager:
 
             self._process_curve(attr, params, method=method, procset=procset, **kwargs)
 
-    def _save_curve(self, path2dc, name, params, format = 'csv', **kwargs):
+    def _save_dc(self, path2dc, name, params, format = 'csv', **kwargs):
         """save a dispersion curve"""
 
         curve_data = self._sql.read_curve(params)
@@ -502,7 +530,7 @@ class BaseManager:
             dc.save(path2dc, name, format=format, **kwargs)
             return curve_data['xmid'].unique().item()
 
-    def save_curve(self, procset=None, method = None,
+    def _save(self, procset=None, method = None,
                    dc_mode=0, use_windows = False, **kwargs):
         """save a dispersion curve for a defined source location, repetition and window id"""
 
@@ -522,20 +550,24 @@ class BaseManager:
                 name = 'dc_sin%d-rep%d-wid%d' % (sin,rep,wid)
                 params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                           'sin': sin, 'rep': rep, 'wid': wid}
-                xmid = self._save_curve(dir, name, params, **kwargs)
+                xmid = self._save_dc(dir, name, params, **kwargs)
                 if xmid is not None:
                     xmids.append(xmid)
         else:
             name = 'dc_sin%d-rep%d' % (sin, rep)
             params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
                       'sin': sin, 'rep': rep, 'wid': -1}
-            xmid = self._save_curve(dir, name, params, **kwargs)
+            xmid = self._save_dc(dir, name, params, **kwargs)
             if xmid is not None:
                 xmids.append(xmid)
 
         return xmids
 
-    def plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
+    def save(self, procset=None, method = None,dc_mode=0, use_windows = False, **kwargs):
+        """save a dispersion curve for a defined source location, repetition and window id"""
+        self._save(procset, method,dc_mode, use_windows, **kwargs)
+
+    def _plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
         """plot portions of the stream data"""
 
         if procset is None:
@@ -550,6 +582,8 @@ class BaseManager:
             self._set_FV(stream, sin, rep, procset=procset, method=method)
 
         wids = self._sql.get_wids(sin, rep, procset)
+        window_axes = []
+
         if use_windows:
             for wid in wids:
                 tmp = copy.deepcopy(stream)
@@ -558,10 +592,59 @@ class BaseManager:
                 if attr in ['dispersionImage','dispersionImageComposite']:
                     self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
 
-                tmp.plot(attr, **kwargs)
+                fig = tmp.plot(attr, **kwargs)
+                window_axes.append(fig)
+            return window_axes, wids
         else:
-            stream.plot(attr, **kwargs)
+            ax = stream.plot(attr, **kwargs)
+            return ax
 
+    def plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
+        """plot portions of the stream data"""
+        self._plot(attr,procset,use_windows,**kwargs)
+
+    # TODO save point list or something?
+    # TODO check error in spyder
+    def show(self, attr='', procset = None, use_windows = False):
+        """show interactive plots"""
+
+        if attr in ['', 'seismogram', 'FK']:
+            DataSwitcher = DataSwitcherFilter
+        elif attr in ['dispersionImage', 'FV']:
+            DataSwitcher = DataSwitcherPick
+        else:
+            DataSwitcher = DataSwitcherBase
+
+        if use_windows:
+            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
+                                        procset=procset,
+                                        procsets=self._sql.get_proc_labels())
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                window.clean()
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        else:
+            window = DataSwitcher(self.data, self._sql,
+                                    procset = procset,
+                                    procsets = self._sql.get_proc_labels())
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                #points = window.get_points()
+                pass
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        plt.close('all')
+
+    # TODO:
     def plot_curve(self, procset=None, method='phaseshift',
                    dc_mode=0, use_windows = False, **kwargs):
         """plot a dispersion curve"""
@@ -588,6 +671,26 @@ class BaseManager:
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
             dc.plot(**kwargs)
+
+    def plot_curves(self, procset = None, method = None,
+                       dc_mode = 0, apply_to = 'all', use_windows=False,**kwargs):
+        """process the dispersion curves"""
+
+        # Apply process to current selection only
+        if apply_to == 'cur':
+            if self.current_stream is None:
+                self.select_data(inplace = True, verbose=False)
+
+            self.plot_curve(procset=procset, method = method,dc_mode=dc_mode, use_windows=use_windows,**kwargs)
+
+        # Apply process to all data sets
+        elif apply_to == 'all':
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+                    self.select_data(sin, rep, inplace=True, verbose=False)
+
+                    self.plot_curve(procset=procset, method = method,
+                                       dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
     def plot_pseusodsection(self, procset=None, method=None,
                             dc_mode=0, cmap='viridis', axes = None, **kwargs):
@@ -644,6 +747,7 @@ class BaseManager:
         else:
             warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
 
+
 class MASW2DManager(BaseManager):
     def __init__(self, prjdir, path2raw, path2geom, settings = None, database = 'swa.db'):
         """
@@ -669,14 +773,18 @@ class MASW2DManager(BaseManager):
             if self.current_stream is None:
                 self.select_data(inplace = True, verbose=False)
 
-            self.plot(attr,procset=procset, use_windows=use_windows, **kwargs)
+            self._plot(attr,procset=procset, use_windows=use_windows, **kwargs)
 
         # Apply process to all data sets
         elif apply_to == 'all':
             for sin in self.data.keys():
                 for rep in self.data[sin].keys():
                     self.select_data(sin, rep, inplace=True, verbose=False)
-                    self.plot(attr, procset=procset, use_windows=use_windows,**kwargs)
+                    self._plot(attr, procset=procset, use_windows=use_windows,**kwargs)
+
+    def plot(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+        """plot the stream data"""
+        self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
 
     def preprocess_streams(self, attr='trim', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """apply preprocessing steps to current selection or all data sets"""
@@ -696,7 +804,7 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Applying {attr} to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
-            self.preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
+            self._preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -713,10 +821,14 @@ class MASW2DManager(BaseManager):
                     sys.stdout.write(f'\rApplying {attr} to (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self.preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
+                    self._preprocess(attr,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
+
+    def preprocess(self, attr='trim', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+        """apply preprocessing steps to current selection or all data sets"""
+        self.preprocess_streams(attr, procset, apply_to, use_windows, **kwargs)
 
     def transform_streams(self, attr='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
@@ -729,7 +841,7 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Applying {attr} transformation to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' ..... ', end = '')
-            self.transform(attr,procset=procset, use_windows=use_windows, **kwargs)
+            self._transform(attr,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -746,13 +858,18 @@ class MASW2DManager(BaseManager):
                     sys.stdout.write(f'\rApplying {attr} transformation to (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self.transform(attr, procset=procset, use_windows=use_windows,**kwargs)
+                    self._transform(attr, procset=procset, use_windows=use_windows,**kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
+    def transform(self, attr='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+        """apply wavefield transformation to current selection or all data sets"""
+        self.transform_streams(attr, procset, apply_to, use_windows, **kwargs)
+
     def extract_curves(self, procset = None, method = None, pck_mode='auto',
                        apply_to = 'all', use_windows=False, **kwargs):
+        """extract dispersion curves"""
 
         # Apply process to current selection only
         if apply_to == 'cur':
@@ -762,7 +879,7 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Dispersion curve extraction of (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' ..... ', end = '')
-            self.extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, method = method, **kwargs)
+            self._extract(procset=procset,use_windows=use_windows, pck_mode = pck_mode, method = method, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -779,10 +896,14 @@ class MASW2DManager(BaseManager):
                     sys.stdout.write(f'\rDispersion curve extraction of (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self.extract(procset=procset,use_windows=use_windows, pck_mode=pck_mode, method = method,**kwargs)
+                    self._extract(procset=procset,use_windows=use_windows, pck_mode=pck_mode, method = method,**kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
+
+    def extract(self, procset = None, method = None, pck_mode='auto',apply_to = 'all', use_windows=False, **kwargs):
+        """extract dispersion curves"""
+        self.extract_curves(procset, method, pck_mode, apply_to, use_windows, **kwargs)
 
     def process_curves(self, attr='smooth', procset = None, method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
@@ -841,8 +962,7 @@ class MASW2DManager(BaseManager):
 
     def save_curves(self, procset = None, method = None,
                        dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
-        """process the dispersion curves"""
-
+        """save the dispersion curves based on receiver spread midpoint"""
         if procset is None:
             procset = self._procset
 
@@ -860,7 +980,7 @@ class MASW2DManager(BaseManager):
             starttime = time.time()
             print(f'Save dispersion curves corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' to file ..... ', end = '')
-            xmid = self.save_curve(procset=procset, method = method,dc_mode=dc_mode,
+            xmid = self._save(procset=procset, method = method,dc_mode=dc_mode,
                                    use_windows=use_windows, **kwargs)
             xmids += xmid
             endtime = time.time()
@@ -879,7 +999,7 @@ class MASW2DManager(BaseManager):
                           f'({sin}, {rep}) to file ..... ')
                     sys.stdout.flush()
 
-                    xmid = self.save_curve(procset=procset, method = method,dc_mode=dc_mode,
+                    xmid = self._save(procset=procset, method = method,dc_mode=dc_mode,
                                            use_windows=use_windows, **kwargs)
                     xmids += xmid
 
@@ -888,6 +1008,11 @@ class MASW2DManager(BaseManager):
 
         # save the xmids to file
         np.savetxt(os.path.join(path2geom, 'xmid.txt'), xmids)
+
+    def save(self, procset = None, method = None,
+                       dc_mode = 0, apply_to = 'all', use_windows=False, **kwargs):
+        """save the dispersion curves based on receiver spread midpoint"""
+        self.save_curves(procset, method,dc_mode, apply_to, use_windows, **kwargs)
 
     # %% WINDOWING
     def moving_window(self, procset = None, apply_to = 'all', **kwargs):
@@ -1105,30 +1230,32 @@ class Tomo2DManager(BaseManager):
     def plot_streams(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """Plot the stream data"""
 
+        if procset is None:
+            procset = self._procset
+
         # Apply process to current selection only
         if apply_to == 'cur':
             if self.current_stream is None:
                 self.select_data(inplace = True, verbose=False)
 
-            self.plot(attr,procset=procset, use_windows=use_windows, **kwargs)
+            self._plot(attr,procset=procset, use_windows=use_windows, **kwargs)
 
         # Apply process to all data sets
         elif apply_to == 'all':
             for sin in self.data.keys():
                 for rep in self.data[sin].keys():
                     self.select_data(sin, rep, inplace=True, verbose=False)
-                    self.plot(attr, procset=procset, use_windows=use_windows,**kwargs)
+                    self._plot(attr, procset=procset, use_windows=use_windows,**kwargs)
+
+    def plot(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+        """plot the stream data"""
+        self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
 
     def prepare_streams(self, min_offset, max_offset, min_rec = 6, procset = None):
         """retrieve subsets of the data based on forward and reverse offset shots"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_new_procset(procset)
-
-        if procset != self._procset:
-            self.set_new_procset(procset)
 
         starttime = time.time()
 
@@ -1174,18 +1301,20 @@ class Tomo2DManager(BaseManager):
                 sys.stdout.write(f'\rApplying {attr} by {by} to (SIN,REP) = 'f'({sin}, {rep}) ..... ')
                 sys.stdout.flush()
 
-                self.preprocess(attr, procset=procset, use_windows=True, by = by, **kwargs)
+                self._preprocess(attr, procset=procset, use_windows=True, by = by, **kwargs)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
+
+    def preprocess(self, attr='trim', by = 'FK', procset = None, **kwargs):
+        """apply preprocessing steps to current selection or all data sets"""
+        self.preprocess_streams(attr, by, procset, **kwargs)
 
     def compute_phasediff(self, procset = None):
         """compute phase differences and store in database"""
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_new_procset(procset)
 
         # compute the phase differences
         starttime = time.time()
@@ -1259,8 +1388,6 @@ class Tomo2DManager(BaseManager):
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
-            self.set_new_procset(procset)
 
         np.set_printoptions(threshold=sys.maxsize)
 
@@ -1490,3 +1617,7 @@ class Tomo2DManager(BaseManager):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode,'xmid': xmid}
             self._save_curve(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
+    def save(self, procset=None, method='tomo2D', dc_mode=0, format = 'csv', **kwargs):
+        """save the dispersion curves based on receiver spread midpoint"""
+        self.save_curves(procset, method, dc_mode, format, **kwargs)

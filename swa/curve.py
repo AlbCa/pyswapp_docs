@@ -328,6 +328,7 @@ class DispersionCurve:
             fig, ax = plt.subplots(figsize=(6, 4))
         else:
             ax = axes
+            fig = ax.figure
 
         if (self.data_orig is not None) and show_orig:
             data_orig = self.data_orig.copy()
@@ -386,8 +387,8 @@ class DispersionCurve:
                 fig.savefig(outfile)
         elif show:
             plt.show()
-        else:
-            return fig
+
+        return fig
 
     def plotColumn(self, data = None, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot dispersion curve data as 1D column to construct pseudosection"""

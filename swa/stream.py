@@ -9,6 +9,7 @@ from scipy import interpolate
 import obspy
 import obspy.signal
 
+from matplotlib.figure import Figure
 from matplotlib.offsetbox import AnchoredText
 #from obspy.signal.filter import bandpass
 
@@ -18,11 +19,11 @@ from .utils import *
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
+warnings.simplefilter(action='ignore', category=RuntimeWarning)
 
 # TODO advanced F-K filtering
 # TODO LRT
 # TODO DLMO
-# TODO modify to work with 3D coordinates
 
 class SeismicStream:
     """class to manipulate a seismic record for the analysis of surface waves"""
@@ -433,6 +434,7 @@ class SeismicStream:
         self._create_st(amps, par)
         self.apply_geometry(sht, recs)
         self._update_params_from_amps(amps)
+        self.tapered = False # TODO does it make sense here??? or write into db?? only FK filter affects this
 
     def reset_pst(self):
         self._pst = None
@@ -499,6 +501,9 @@ class SeismicStream:
         self.velocity = None
         self.frequency = None
         self.wavenumber = None
+
+        self.FK_data = {}
+
         self._pick = False
         self.picks = {}
         self.curve = None
@@ -621,6 +626,10 @@ class SeismicStream:
     def _aoffsets(self, receiver, source):
         """compute absolute shot receiver offsets"""
         return abs(self._offsets(receiver, source))
+
+    @property
+    def offset(self):
+        return self._offsets(self.receiver,self.source)
 
     def _dx(self,receiver):
         """compute receiver separations"""
@@ -1128,7 +1137,7 @@ class SeismicStream:
         while terminate is False:
 
             fig, ax = plt.subplots(figsize=(8, 5))
-            self._plotSeismogram(axes=ax, amp_scale=1, **kwargs)
+            self._plotSeismogram(axes=ax, amp_scale=1, show = False, **kwargs)
 
             text = '\n'.join((
                 r'$\bf{Keyboard \quad commands:}$',
@@ -1215,32 +1224,22 @@ class SeismicStream:
         ndelay = int(abs(delay / dt))
         npts = len(st_proc[0].data)
 
+        ((idx1, t1), (idx2, t2)) = points
+        x1 = receiver[idx1]
+        x2 = receiver[idx2]
+        idx_between = np.where((receiver >= x1) & (receiver <= x2))[0]
+        slope = (t2 - t1) / (x2 - x1)
+        times = t1 + slope * (receiver[idx_between] - x1)
+
         # top mute boundary (straight line)
         top_idx = np.zeros_like(receiver, dtype=int)
         if key == 't':
-
-            ((idx1, t1), (idx2, t2)) = points
-
-            x1 = receiver[idx1]
-            x2 = receiver[idx2]
-            idx_between = np.where((receiver >= x1) & (receiver <= x2))[0]
-
-            slope = (t2 - t1) / (x2 - x1)
-            times = t1 + slope * (receiver[idx_between] - x1)
             top_idx_between = np.array((times / dt) + ndelay, dtype=int)
             top_idx[idx_between] = top_idx_between
 
         # bottom mute boundary (straight line)
         bottom_idx = np.ones_like(receiver, dtype=int) * (npts - 1)
         if key == 'b':
-            ((idx1, t1), (idx2, t2)) = points
-
-            x1 = receiver[idx1]
-            x2 = receiver[idx2]
-            idx_between = np.where((receiver >= x1) & (receiver <= x2))[0]
-
-            slope = (t2 - t1) / (x2 - x1)
-            times = t1 + slope * (receiver[idx_between] - x1)
             bottom_idx_between = np.array((times / dt) + ndelay, dtype=int)
             bottom_idx[idx_between] = bottom_idx_between
 
@@ -1253,6 +1252,17 @@ class SeismicStream:
             window *= 0
 
         self._pst = st_proc
+
+    def linear_mute(self, points,key='t', **kwargs):
+
+        # extract points from points_list
+        points_list = []
+        if len(points) > 0:
+            x, y = zip(*sorted(points.items()))
+            for i in range(len(x)):
+                points_list.append((x[i], y[i]))
+
+            self._linear_mute(points_list, key, **kwargs)
 
     def _reset_mute(self):
 
@@ -1395,10 +1405,10 @@ class SeismicStream:
         # top half
         FK[:pos_freq] = FK_unwrap
         # bottom half
-        FK[pos_freq:,] = np.conj(np.rot90(FK_unwrap, 2))
+        FK[pos_freq:] = np.conj(np.rot90(FK_unwrap, 2))
 
         # back transformation
-        FK = np.fft.ifftshift(np.transpose(np.conjugate(FK)))
+        FK = np.fft.ifftshift(np.transpose(np.conj(FK)))
         amps = np.fft.ifft2(FK,s=(iF,iF)).real
         amps = amps[:iX,:iT]
 
@@ -1458,6 +1468,104 @@ class SeismicStream:
 
         return FK_abs, theta, kw, freq,iX,iT
 
+    def _add_fk_data_to_dict(self,FK_data, theta = None, kw = None, freq = None, iX = None, iT = None):
+        self.FK_data['FK_abs'] = FK_data
+        if theta is not None:
+            self.FK_data['theta'] = theta
+        if kw is not None:
+            self.FK_data['kw'] = kw
+        if freq is not None:
+            self.FK_data['freq'] = freq
+        if iX is not None:
+            self.FK_data['iX'] = iX
+        if iT is not None:
+            self.FK_data['iT'] = iT
+
+    def fk_filter_from_pick_ui(self, points, key = 't', **kwargs):
+        """apply fk filter from picking boundaries"""
+
+        # transformation
+        # if self.FK_data:
+        #     FK_abs  = self.FK_data['FK_abs']
+        #     theta = self.FK_data['theta']
+        #     kw = self.FK_data['kw']
+        #     freq = self.FK_data['freq']
+        #     iX = self.FK_data['iX']
+        #     iT = self.FK_data['iT']
+        # else:
+        #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
+        #     self._add_fk_data_to_dict(FK_abs, theta, kw, freq, iX, iT)
+        FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
+
+        npoints = FK_abs.shape[1]
+
+        fpos = freq[:npoints // 2]
+        df = fpos[1] - fpos[0]
+
+        # kwpos = np.linspace(0, np.max(kw), npoints)
+        kwpos = np.linspace(0, 2 * np.max(kw), npoints)
+
+        if self.kmax is None:
+            self.kmax = np.max(kwpos[:npoints // 2])
+
+        # tapering function
+        taper_func = getattr(signal.windows, 'hann')
+        taper_len = int(kwargs.pop('taper_length', 5) // df)
+        taper_win = taper_func(2 * taper_len)
+
+        FK_abs_filt = FK_abs.copy()
+
+        points_list = []
+        if len(points) > 0:
+            x, y = zip(*sorted(points.items()))
+            for i in range(len(x)):
+                points_list.append((x[i], y[i]))
+
+            fp = np.array([np.round(points_list[i][1], 4) for i in range(len(points_list))])
+            kp = np.array([np.round(points_list[i][0], 4) for i in range(len(points_list))])
+            f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
+            kpp = f(fpos)
+
+            if key == 't':
+                window = np.zeros_like(FK_abs_filt[0, :])
+                for j in range(len(fpos)):
+                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+                    window[k_min_tmp:] = 1
+                    if k_min_tmp > taper_len - 1:
+                        window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
+                    else:
+                        window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
+
+                    FK_abs_filt[j, :] *= window
+                    window *= 0
+
+            if key == 'b':
+                window = np.ones_like(FK_abs_filt[0, :])
+                for j in range(len(fpos)):
+                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+                    window[k_min_tmp:] = 0
+                    if k_min_tmp < len(kwpos) - taper_len:
+                        window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
+                    else:
+                        window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
+
+                    FK_abs_filt[j, :] *= window
+                    window = np.ones_like(FK_abs_filt[0, :])
+
+        # back transformation
+        FK_filt = FK_abs_filt * np.exp(1j * theta)
+        FK_filt = np.fft.ifftshift(FK_filt, axes=1)
+        FK_filt[:,:npoints // 2] = 0
+
+        amps = self._fk_backtransform(FK_filt, iT, iX)
+        self._amps2st(amps)
+
+    def reset_FK(self):
+        """Reset FK filter"""
+        self._pst = self._st.copy()
+
+    #################
+    # DEPRECATED!!!!!
     def _fk_filter_from_pick(self, fname=None, show=False, **kwargs):
         """apply fk filter by picking boundaries"""
 
@@ -1591,6 +1699,8 @@ class SeismicStream:
             plt.tight_layout()
             plt.show()
 
+    #################
+
     def _fk_filter_from_file(self, fname=None, show=False, **kwargs):
         """apply the fk filter based on a file containing the bounds"""
 
@@ -1690,6 +1800,7 @@ class SeismicStream:
         else:
             warn_msg = "No file provided with FK filter. No filtering applied."
             self.logger.warning(warn_msg)
+
 
     def transform(self, method = 'phaseshift'):
         """Apply the wave field transformation"""
@@ -2329,36 +2440,84 @@ class SeismicStream:
         return norm_power
 
     # %% PLOTTING
-    def plot(self,attr,**kwargs):
+    def plot(self,attr = '',**kwargs):
         """Create static plots"""
 
-        if attr == 'geometry':
-            ax = self._plotGeometry(**kwargs)
-            return ax
-        elif attr == 'seismogram':
-            self._plotSeismogram(**kwargs)
+        if attr == 'geometry' or attr == 'geom':
+            fig = self._plotGeometry(**kwargs)
+            return fig
+        elif attr == 'seismogram' or attr == '':
+            fig = self._plotSeismogram(**kwargs)
+            return fig
         elif attr == 'spectrogram':
-            self._plotSpectrogram(**kwargs)
+            fig = self._plotSpectrogram(**kwargs)
+            return fig
         elif attr == 'spectra':
-            self._plotSpectra(**kwargs)
+            fig = self._plotSpectra(**kwargs)
+            return fig
         elif attr == 'spectrogramComposite':
-            self._plotSpectrogramComposite(**kwargs)
+            fig = self._plotSpectrogramComposite(**kwargs)
+            return fig
         elif attr == 'FK':
-            self._plotFK(**kwargs)
+            fig = self._plotFK(**kwargs)
+            return fig
         elif attr == 'SFR':
-            self._plotSFR(**kwargs)
-        elif attr == 'dispersionImage':
-            self._plotDispersionImage(**kwargs)
-        elif attr == 'dispersionImageComposite':
-            self._plotDispersionImageComposite(**kwargs)
+            fig = self._plotSFR(**kwargs)
+            return fig
+        elif attr == 'dispersionImage' or attr == 'FV':
+            fig = self._plotDispersionImage(**kwargs)
+            return fig
+        elif attr == 'dispersionImageComposite' or attr == 'FVComposite':
+            fig = self._plotDispersionImageComposite(**kwargs)
+            return fig
+        elif attr == 'geomShort':
+            fig = self._plotGeomShort()
+            return fig
+
         else:
             self.logger.error(f'Invalid attribute "{attr}".')
+
+    def _plotGeomShort(self,axes=None):
+        """plot acquisition setup of shot file"""
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+        all_receiver = self._receiver(self._st)
+        ax.scatter(all_receiver, np.zeros(len(all_receiver)), marker='v', c='k',label='active channels',alpha = 0.7)
+        ax.scatter(self.receiver, np.zeros(len(self.receiver)), marker='v', c='lightgrey',label='selected channels')
+        ax.scatter(self.source, 0.2, marker='*', s= 60,c='r', label='shot location')
+
+        # Use the min and max source position instead
+        if self.source < np.min(all_receiver):
+            xmin = self.source
+            xmax = np.max(all_receiver)
+        elif self.source > np.max(all_receiver):
+            xmin = np.min(all_receiver)
+            xmax = self.source
+        else:
+            xmin = np.min(all_receiver)
+            xmax = np.max(all_receiver)
+
+        ax.set_xlim([xmin - 1,
+                      xmax + 1])
+        ax.set_ylim([-0.5, 0.5])
+        ax.get_yaxis().set_ticks([])
+        ax.get_xaxis().set_ticks([])
+        ax.grid(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+
+        return fig
 
     def _plotGeometry(self,axes=None, outfile=None, fmt=None, show=True):
         """plot acquisition setup of shot file"""
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(6, 2))
+            #fig, ax = plt.subplots(figsize=(8, 4))
+            fig = Figure(figsize=(8,4), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = ax.figure
@@ -2397,7 +2556,7 @@ class SeismicStream:
             return ax
 
         if show:
-            plt.tight_layout()
+            #plt.tight_layout()
             plt.show()
 
         if outfile:
@@ -2406,7 +2565,7 @@ class SeismicStream:
             else:
                 fig.savefig(outfile)
 
-        return None
+        return fig
 
     def _plotSeismogram(self, axes=None, st = None, amp_scale=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot seismogramm of a single shot file"""
@@ -2424,7 +2583,9 @@ class SeismicStream:
         alpha = kwargs.pop('alpha',0.5)
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(8,6))
+            #fig, ax = plt.subplots(figsize=(8,8),constrained_layout=True)
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2471,6 +2632,7 @@ class SeismicStream:
         ax.set_xlim(-2,(len(amps)-1)+2)
 
         if kwargs.pop('show_xticks',True):
+
             ax.xaxis.tick_top()
             offsets = self.receiver
             xticks = np.arange(len(offsets))[step-1::step]
@@ -2480,11 +2642,11 @@ class SeismicStream:
                 xticklabels.append(f'{st[i].stats.channel}\n{offsets[i]}')
             ax.set_xticklabels(xticklabels)
 
-            text = 'channel nr.:\ndistance (m):'
+            text = 'channel:\nx (m):'
             at = AnchoredText(text,
                               loc='lower left',
-                              prop=dict(ha='right'),
-                              bbox_to_anchor=(-0.15, 1.0),
+                              prop=dict(ha='right',fontweight = 'bold'),
+                              bbox_to_anchor=(-0.125, 1.0),
                               pad=0, borderpad=0.8, frameon=False,
                               bbox_transform=ax.transAxes)
             ax.add_artist(at)
@@ -2502,8 +2664,8 @@ class SeismicStream:
         ax.grid(axis='y', linestyle=":")
         ax.invert_yaxis()
 
-        if axes is not None:
-            return ax
+        # if axes is not None:
+        #     return ax
 
         if outfile:
             if fmt:
@@ -2511,8 +2673,10 @@ class SeismicStream:
             else:
                 fig.savefig(outfile)
         elif show:
-            plt.tight_layout()
+            #plt.tight_layout()
             plt.show()
+
+        return fig
 
     def _plotSpectrogram(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot spectrogram"""
@@ -2568,7 +2732,9 @@ class SeismicStream:
         abs_amps_max = round(np.percentile(abs_amps, 95))
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(8,6))
+            #fig, ax = plt.subplots(figsize=(8,8))
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2621,8 +2787,10 @@ class SeismicStream:
             return ax
 
         elif show:
-            plt.tight_layout()
+            #plt.tight_layout()
             plt.show()
+
+        return fig
 
     def _plotSpectra(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot spectra"""
@@ -2655,7 +2823,9 @@ class SeismicStream:
         freq = freq[fids]
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(3, 4))
+            #fig, ax = plt.subplots(figsize=(8,8))
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2702,14 +2872,21 @@ class SeismicStream:
             return ax
 
         elif show:
-            plt.tight_layout()
+            #plt.tight_layout()
             plt.show()
+
+        return fig
 
     def _plotSpectrogramComposite(self, axes=None, outfile=None, fmt=None, show=True, **kwargs):
         """plot seismogram, spectrogram and spectra"""
 
         if axes is None:
-            fig, ax = plt.subplots(1, 3, figsize=(16, 4))
+            #fig, ax = plt.subplots(1, 3, figsize=(16, 4))
+            fig = Figure(figsize=(16,4), constrained_layout=True)
+            ax0 = fig.add_subplot(1, 3, 1)
+            ax1 = fig.add_subplot(1, 3, 2)
+            ax2 = fig.add_subplot(1, 3, 3)
+            ax = [ax0,ax1,ax2]
         else:
             ax = axes
             fig = axes.figure
@@ -2731,11 +2908,15 @@ class SeismicStream:
             plt.tight_layout()
             plt.show()
 
+        return fig
+
     def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True,**kwargs):
         """plot FK image"""
 
         if axes is None:
-            fig,ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
+            #fig,ax = plt.subplots(figsize=(8,8), constrained_layout=True)
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2764,37 +2945,42 @@ class SeismicStream:
 
             FK_data = FK_data[fmin:fmax,kmin:kmax]
 
-        # Normalization
-        if self.norm_power:
-            FK_data = self._norm_power(FK_data)
-            label = "amplitudes (normalized)"
-        else:
-            label = "amplitudes"
-
-        img = ax.imshow(abs(FK_data), aspect='auto', origin='lower',
-                           extent=[self.kmin, self.kmax, self.fmin, self.fmax],
-                           cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
-        ax.set_ylabel('frequency (Hz)')
-        ax.set_xlabel('wavenumber (rad/m)')
-        ax.grid(linestyle=':')
-
-        for axis in ['top', 'bottom', 'left', 'right']:
-            ax.spines[axis].set_linewidth(1)
-
-        plt.colorbar(img, label=label, ax=ax)
-
-        if outfile:
-            if fmt:
-                fig.savefig(outfile, format=fmt)
+        if FK_data.shape[1] > 0:
+            # Normalization
+            if self.norm_power:
+                FK_data = self._norm_power(FK_data)
+                label = "amplitudes (normalized)"
             else:
-                fig.savefig(outfile)
+                label = "amplitudes"
 
-        if axes is not None:
-            return ax
+            img = ax.imshow(abs(FK_data), aspect='auto', origin='lower',
+                               extent=[self.kmin, self.kmax, self.fmin, self.fmax],
+                               cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
+            ax.set_ylabel('frequency (Hz)')
+            ax.set_xlabel('wavenumber (rad/m)')
+            ax.grid(linestyle=':')
 
-        elif show:
-            #plt.tight_layout()
-            plt.show()
+            for axis in ['top', 'bottom', 'left', 'right']:
+                ax.spines[axis].set_linewidth(1)
+
+            plt.colorbar(img, label=label, ax=ax)
+
+            if outfile:
+                if fmt:
+                    fig.savefig(outfile, format=fmt)
+                else:
+                    fig.savefig(outfile)
+
+            if axes is not None:
+                return ax
+
+            elif show:
+                #plt.tight_layout()
+                plt.show()
+
+            return fig
+
+        return None
 
     def _plotSFR(self, axes=None, st = None, amp_scale=None, outfile=None,
                         fmt=None, show=True, **kwargs):
@@ -2812,7 +2998,9 @@ class SeismicStream:
         alpha = kwargs.pop('alpha',0.5)
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(6, 4))
+            #fig, ax = plt.subplots(figsize=(8,8))
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2895,12 +3083,16 @@ class SeismicStream:
             plt.tight_layout()
             plt.show()
 
+        return fig
+
     def _plotDispersionImage(self,axes=None, outfile=None, fmt=None, show=True,
                              **kwargs):
         """plot dispersion image"""
 
         if axes is None:
-            fig,ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
+            #fig,ax = plt.subplots(figsize=(8,8), constrained_layout=True)
+            fig = Figure(figsize=(8,8), constrained_layout=True)
+            ax = fig.add_subplot(111)
         else:
             ax = axes
             fig = axes.figure
@@ -2965,6 +3157,8 @@ class SeismicStream:
             #plt.tight_layout()
             plt.show()
 
+        return fig
+
     def _plotDispersionImageComposite(self, axes=None, outfile=None, fmt=None, show=True,title = None,
                              **kwargs):
         """plot geometry, seismogram and dispersion image"""
@@ -3016,10 +3210,12 @@ class SeismicStream:
             plt.tight_layout()
             plt.show()
 
+        return fig
+
     def _plotMOPA(self, data, stop=1, axes=None, outfile=None, **kwargs):
 
         if axes is None:
-            fig,ax = plt.subplots(3, 1, figsize=(6, 6))
+            fig,ax = plt.subplots(3, 1, figsize=(8, 8))
         else:
             ax = axes
             fig = axes.figure

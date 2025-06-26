@@ -2,6 +2,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import math
+import time
 
 class StdevFunc:
     """SQLITE aggregate stdev"""
@@ -23,16 +24,34 @@ class StdevFunc:
             return None
         return math.sqrt(self.S / (self.k-1))
 
+# TODO problem with connection --> check at the beginning if connection exists and then safely close and reestablish it
+# TODO change persistent self._con to while for safe connect/close with spyder
 class SQL:
     """Handle an SQLite database"""
     def __init__(self, database):
 
-        self._con = database
-        self._connect(name=self._con)
+        self._con = None
+        self.database = database
 
+        self._init_connection()
+
+    def get_connection(self):
+        con = sqlite3.connect(self.db_path)
+        con.create_aggregate("STDEV", 1, StdevFunc)
+        return con
+
+    def _init_connection(self):
+
+        if self._con:
+            print('helllooo')
+            try:
+                self._disconnect()
+            except:
+                pass
+
+        self._connect(name=self.database)
         self._con.create_aggregate("STDEV", 1, StdevFunc)
 
-    # %% Basic interaction
     def _connect(self,name = 'name.db'):
         """Create a connection to a SQL database"""
         self._con = sqlite3.connect(name)
@@ -40,6 +59,7 @@ class SQL:
     def _disconnect(self):
         """Close the connection to a SQL database"""
         self._con.close()
+        self._con = None
 
     def _create_table(self, name, columns, types):
         """Create a sql table"""
@@ -206,8 +226,21 @@ class SQL:
         labels = self.read_sql(sql)['procset'].values
         return labels
 
+    def get_trafo_labels(self,procset):
+
+        if 'FV' in self.get_tables():
+            sql = """SELECT DISTINCT method
+                     FROM FV WHERE procset=='%s'""" % procset
+            labels = self.read_sql(sql)['method'].values
+            return labels
+
+        return []
+
     def check_data(self,table, params):
         """Check if entry in database"""
+
+        if table not in self.get_tables():
+            return pd.DataFrame().empty
 
         sql = """SELECT procset, sin, rep
                   FROM %s
@@ -227,16 +260,26 @@ class SQL:
 
     def delete_data(self,table, params):
         """delete entry from database"""
-        sql = """DELETE FROM %s WHERE """ % table
 
-        npar = len(params)
+        try:
+            sql = """DELETE FROM %s WHERE """ % table
+            npar = len(params)
 
-        for i,key in enumerate(params.keys()):
-            if i < npar-1:
-                sql += f"{key}=={params[key]} AND "
-            else:
-                sql += f"{key}=={params[key]}"
-        self._con.execute(sql)
+            for i,key in enumerate(params.keys()):
+                if i < npar-1:
+                    sql += f"{key}=={params[key]} AND "
+                else:
+                    sql += f"{key}=={params[key]}"
+            self._con.execute(sql)
+
+        except sqlite3.OperationalError:
+            pass
+
+    def dublicate_data(self,data, sin, rep, wid=-1):
+
+        params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % 'tmp', 'wid': wid}
+        if self.check_data('amps', params):
+            self.write_data(data, sin, rep, 'tmp', wid=wid)
 
     def write_data(self, data, sin, rep, procset, wid = -1):
         """write processed data to database"""
@@ -282,6 +325,8 @@ class SQL:
         amps_df.insert(1, 'wid', wid)
         amps_df.insert(2, 'sin', sin)
         amps_df.insert(3, 'rep', rep)
+
+
 
         df = pd.concat([df, amps_df])
 
