@@ -37,7 +37,7 @@ from .curves import CombineCurves
 # TODO: improve set up of project
 
 class BaseManager:
-    def __init__(self, prjdir, path2raw, path2geom, settings=None, database='swa.db'):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
         """
         Base manager class for surface wave analysis
 
@@ -59,8 +59,6 @@ class BaseManager:
 
         self.settings = settings
 
-        self.fileList, self.ext = get_fileList(self.path2raw)
-
         self.database = database
 
         self._init_params()
@@ -71,17 +69,57 @@ class BaseManager:
         if os.path.isfile(self.path2db):
             self._load_project()
         else:
-            self._create_project()
+            self._create_project(**kwargs)
 
-    def _create_project(self):
+    def _create_project(self,**kwargs):
         """Create the project directory and database"""
 
         print('Creating project:')
         # set up project directory
-        subdirs = ['proc','plot']
+        create_projectdir(self.prjdir)
 
-        for sd in subdirs:
-            safe_makedirs(os.path.join(self.prjdir, sd))
+        # check if data exists in project directory
+        if (len(os.listdir(os.path.join(self.prjdir,'01_data/raw'))) == 0):
+            if (self.path2raw is not None):
+
+                rename = kwargs.pop('rename', True)
+                print('Copying and renaming raw data into project directory ..... ' , end="")
+                starttime = time.time()
+                _, self.ext = get_fileList(self.path2raw)
+                rename_files(self.path2raw, extension=self.ext, prjdir=self.prjdir,rename = rename)
+                endtime = time.time()
+                print(f'{np.round(endtime - starttime, 2)} s')
+
+            else:
+                raise FileNotFoundError('Raw data not found.')
+
+        self.path2raw = os.path.join(self.prjdir, '01_data/raw')
+        self.fileList, self.ext = get_fileList(self.path2raw)
+
+        # check if geometry exists in project directory
+        if ('geometry.csv' not in os.listdir(os.path.join(self.prjdir, '02_geom'))):
+            if (self.path2geom is not None):
+                if os.path.isfile(self.path2geom):
+                    print('Copying geometry into project directory ..... ' , end="")
+                    starttime = time.time()
+                    shutil.copy(self.path2geom, os.path.join(self.prjdir, '02_geom/geometry.csv'))
+                    endtime = time.time()
+                    print(f'{np.round(endtime - starttime, 2)} s')
+                else:
+                    raise FileExistsError
+            else:
+                try:
+                    print('geometry.csv not provided or found. Trying to create from data ..... ', end="")
+                    starttime = time.time()
+                    create_geometry(self.fileList, os.path.join(self.prjdir, '02_geom/geometry.csv'))
+                except:
+                    raise FileNotFoundError('Geometry file not found and '
+                                            'data does not contain source/receiver information.')
+
+                endtime = time.time()
+                print(f'{np.round(endtime - starttime, 2)} s')
+
+        self.path2geom = os.path.join(self.prjdir, '02_geom/geometry.csv')
 
         self._sql = SQL(database=self.path2db)
 
@@ -107,6 +145,10 @@ class BaseManager:
 
     def _load_project(self):
         """Load the project"""
+
+        self.path2raw = os.path.join(self.prjdir, '01_data/raw')
+        self.fileList, self.ext = get_fileList(self.path2raw)
+        self.path2geom = os.path.join(self.prjdir, '02_geom/geometry.csv')
 
         print('Loading project:')
         self._sql = SQL(database=self.path2db)

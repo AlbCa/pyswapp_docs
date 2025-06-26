@@ -8,6 +8,7 @@ import pandas as pd
 
 import warnings
 import logging
+import shutil
 
 supported_extensions = ['.sg2','.dat','.syn','.sgy','.syn']
 
@@ -31,6 +32,39 @@ def create_logging(name):
     logger.addHandler(ch)
 
     return logger
+
+
+# TODO set up project dir
+# [data[raw,rename],geom,proc]
+def create_projectdir(prjdir = ''):
+    """create project directory"""
+
+    subdirs = ['01_data/raw','02_geom','03_proc','04_figs']
+    for sd in subdirs:
+        safe_makedirs(os.path.join(prjdir,sd))
+
+
+def rename_files(path2raw, extension = '.sg2', prjdir = '', channel_nr = 1000, rename = False):
+    """rename file for easier handling of geometry"""
+
+    if not '.' in extension:
+        extension = '.' + extension
+
+    original = []
+    for fname in os.listdir(path2raw):
+        if fname.endswith(extension):
+            original.append(fname)
+    original = natural_sort(original)
+    renamed = [f'Shotfile_{channel_nr+i}{extension}' for i in range(len(original))]
+
+    # Copy and rename the copied file
+    for fname_old,fname_new in zip(original,renamed):
+        #path, name = os.path.split(fname)
+        shutil.copy(os.path.join(path2raw,fname_old), os.path.join(prjdir,f'01_data/raw/{fname_old}'))
+
+        if rename:
+            shutil.move(os.path.join(prjdir,f'01_data/raw/{fname_old}'), os.path.join(prjdir,f'01_data/raw/{fname_new}'))
+
 
 # %% file tools for reading/writing
 def print_inventory(dct):
@@ -161,97 +195,6 @@ def get_shotfiles_from_geometry(path2raw, shot_files, extension = '.sg2', sort_a
 
     return path2sht
 
-# def create_geometry(path2shts, path2geom = 'geometry.csv'):
-#     """
-#     create a geometry.csv from seismic shot files (.sgy and .sg2 file formats)
-#
-#     This function can be used to convert the source and geophone coordinate information contained
-#     in the seismic raw data to the geometry file format. The geometry file is a csv file that stores
-#     an abstract representation of the survey layout, that can be optionally passed to some modules.
-#     Check out docs/geometry_file.pdf for a description of the format.
-#
-#     Parameters
-#     ----------
-#     path2shts: list, paths to shot files
-#     path2geom: str, path to geometry file
-#     """
-#
-#     from swa.stream import SeismicStream
-#
-#     geom = pd.DataFrame(columns=['x','y','z','geo','shot','first_geo','ngeo'])
-#
-#     # add receiver stations first
-#     nids = 0
-#     for i in range(len(path2shts)):
-#
-#         # seismic stream containing survey geometry
-#         stream = SeismicStream(path2shts[i])
-#         stream.read_data_geom(path2shts[i], channel_nr=1001)
-#
-#         # shot parameters
-#         stream.set_shot_params()                    # set the shot parameters from the seismic data
-#         receiver = stream.receiver                  # geophone x-coordinates
-#         ngeo = stream.nchannels                     # number of geophones
-#         nids += ngeo
-#
-#         df = pd.DataFrame({'x':receiver,
-#                            'y': 0,
-#                            'z': 0,
-#                            'geo': 1,
-#                            'shot': '-1',
-#                            'first_geo': 1,
-#                            'ngeo': -1})
-#
-#         geom = pd.concat([geom, df])
-#         nids += ngeo
-#
-#     geom = geom.drop_duplicates(subset=['x']).reset_index(drop=True)
-#     geom = geom.sort_values(by = 'x')
-#     geom.insert(0, 'id', np.arange(len(geom)))
-#
-#     # add the shots
-#     for i in range(len(path2shts)):
-#
-#         # seismic stream containing survey geometry
-#         stream = SeismicStream(path2shts[i])
-#         stream.read_data_geom(path2shts[i], channel_nr=1001)
-#
-#         # shot parameters
-#         stream.set_shot_params()                    # set the shot parameters from the seismic data
-#         first_geo = stream.receiver[0]              # first geophone
-#         ngeo = stream.nchannels                     # number of geophones
-#         name = stream.pre                           # file name
-#         sin = str(int(get_num_from_str(name)[0]))   # numerical part of file
-#         source = stream.source                      # source x-coordinate
-#         nids += ngeo
-#
-#         sid = np.where(geom.x == source)[0]
-#
-#         first_geo_id = geom.id[geom.x == first_geo].item()
-#
-#         if len(sid) > 0:
-#             if geom.loc[sid[0],'shot'] == '-1':
-#                 geom.loc[sid[0],'shot'] = sin
-#             else:
-#                 geom.loc[sid[0],'shot'] += ';' + sin
-#
-#             geom.loc[sid[0],'first_geo'] = first_geo_id+1
-#             geom.loc[sid[0],'ngeo'] = ngeo
-#
-#         else:
-#             df = pd.DataFrame({'x':source,
-#                                'y': 0,
-#                                'z': 0,
-#                                'geo': 0,
-#                                'shot': sin,
-#                                'first_geo': first_geo_id+1,
-#                                'ngeo': ngeo})
-#             geom = pd.concat([geom, df])
-#
-#     geom = geom.sort_values(by='x')
-#     geom = geom.drop(columns=['id'])
-#
-#     geom.to_csv(path2geom, index=False, header=False)
 
 def create_geometry(path2shts, path2geom = 'geometry.csv'):
     """
