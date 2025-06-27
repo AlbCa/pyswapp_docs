@@ -1021,10 +1021,10 @@ class SeismicStream:
             max = kwargs.setdefault('max', np.inf)
             self._filter_freq(type,min,max)
         elif by == 'FK':
-            if 'manual' in kwargs:
-                self._fk_filter_from_pick(**kwargs)
-            else:
-                self._fk_filter_from_file(**kwargs)
+            # if 'manual' in kwargs:
+            #     self._fk_filter_from_pick(**kwargs)
+            # else:
+            self._fk_filter_from_file(**kwargs)
         elif by == 'LMO':
             vel = kwargs.setdefault('vel', None)
             bulk_shift = kwargs.setdefault('bulk_shift', 0)
@@ -2182,7 +2182,10 @@ class SeismicStream:
 
             if auto_method == 'max':
                 # locate amplitude maxima in dispersion image at each frequency, i.e. apparent dispersion curve
-                self.extraction_method = f'{self.trafo_type}_max'
+                self.extraction_method = f'max'
+
+                if self.dispersive_energy is None:
+                    self.transform()
 
                 peaks_idx = np.argmax(self.dispersive_energy, axis=0)
 
@@ -2591,7 +2594,7 @@ class SeismicStream:
         color = kwargs.pop('color', 'dimgrey')
         linewidth = kwargs.pop('linewidth', 0.5)
         title = kwargs.pop('title', f'Shotfile {self.pre}')
-        step = kwargs.pop('tick_scale', 10)
+        step = kwargs.pop('tick_scale', len(self.receiver)//3)
         alpha = kwargs.pop('alpha',0.5)
         show_map = kwargs.pop('show_map', False)
 
@@ -2671,6 +2674,7 @@ class SeismicStream:
                 xticklabels.append(f'{offsets[i]}')
             ax.set_xticklabels(xticklabels)
             ax.set_xlabel('x (m)')
+            ax.locator_params(axis='x', nbins=4)
             # ax.tick_params(
             #     axis='x',
             #     which='both',

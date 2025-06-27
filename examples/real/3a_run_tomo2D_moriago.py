@@ -3,7 +3,7 @@ from plot_settings import *
 
 # %% TOMOGRAPHIC LIKE APPROACH
 # directories
-prj_dir = '../data/real_data/Moriago'
+prj_dir = '../../data/real_data/Moriago'
 path2raw = os.path.join(prj_dir,'raw')
 path2geom = f'{prj_dir}/geometry_raw.csv'
 ext = '.sg2' # shot file extension

@@ -9,6 +9,7 @@ from .utils import *
 from .stream import SeismicStream
 from .curve import DispersionCurve
 from .curves import CombineCurves
+from .qtapps import *
 
 # TODO
 # 1. Project directory
@@ -153,7 +154,7 @@ class BaseManager:
 
         print('Loading project:')
         self._sql = SQL(database=self.path2db)
-            
+
         #self._sql.read_setting(self.settings)
         # load settings
         self.settings = self._sql.get_table('settings')
@@ -469,21 +470,14 @@ class BaseManager:
             for wid in wids:
                 tmp = copy.deepcopy(stream)
                 self._set_data(tmp, sin, rep, procset, wid)
-                FV_exists = self._set_FV(tmp, sin, rep, self._procset, wid, method=method)
-                if (method == 'MOPA') or (method != 'MOPA' and FV_exists):
-                    self._extract_dc(tmp,pck_mode, sin = sin, rep = rep, wid = wid, procset=procset,
-                                  method = method, **kwargs)
-                else:
-                    self.logger.error(f'No wavefield-transformation for ({sin},{rep}) for picking.')
+                self._set_FV(tmp, sin, rep, self._procset, wid, method=method)
+                self._extract_dc(tmp,pck_mode, sin = sin, rep = rep, wid = wid, procset=procset,
+                              method = method, **kwargs)
         else:
             self._set_data(stream, sin, rep, procset)
-            FV_exists = self._set_FV(stream, sin, rep, procset=procset, method=method)
-
-            if (method == 'MOPA') or (method != 'MOPA' and FV_exists):
-                self._extract_dc(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset,
-                              method = method, **kwargs)
-            else:
-                self.logger.error(f'No wavefield-transformation for ({sin},{rep}) for picking.')
+            self._set_FV(stream, sin, rep, procset=procset, method=method)
+            self._extract_dc(stream, pck_mode, sin=sin, rep=rep, wid=-1, procset=procset,
+                          method = method, **kwargs)
 
     def extract(self, procset=None, use_windows=False, method=None, pck_mode='auto', **kwargs):
         """apply dispersion curve picking to a stream"""
@@ -584,7 +578,7 @@ class BaseManager:
         sin = self.selected_ids[0]
         rep = self.selected_ids[1]
 
-        dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
+        dir = os.path.join(self.prjdir, f'03_proc/{procset}/{method}')
         safe_makedirs(dir)
 
         xmids = []
@@ -643,104 +637,6 @@ class BaseManager:
             ax = stream.plot(attr, show=True, **kwargs)
             return ax
 
-    def plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
-        """plot portions of the stream data"""
-        self._plot(attr,procset,use_windows,**kwargs)
-
-    # TODO save point list or something?
-    def gui_interact(self, attr='', procset = None, use_windows = False):
-        """show interactive plots and interact with them"""
-
-        if attr not in ['geometry','geom','seismogram','','spectrogram',
-                        'spectra','spectrogramComposite','FK','SFR','dispersionImage','FV']:
-            self.logger.error(f'AttributeError: {attr} does not exist.')
-            pass
-
-        window_title = 'SWA - Interactive Figure Viewer'
-
-        if attr in ['', 'seismogram']:
-            DataSwitcher = DataSwitcherFilterSeis
-        elif attr in ['dispersionImage', 'FV']:
-            DataSwitcher = DataSwitcherPick
-        elif attr == 'FK':
-            DataSwitcher = DataSwitcherFilterFK
-        else:
-            DataSwitcher = DataSwitcherBase
-
-        if use_windows:
-            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
-                                        procset=procset,
-                                        procsets=self._sql.get_proc_labels(),
-                                        window_title=window_title)
-            window.resize(800, 600)
-            window.show()
-
-            def handle_about_to_quit():
-                window.clean()
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
-
-        else:
-            window = DataSwitcher(self.data, self._sql, plot=attr,
-                                    procset = procset,
-                                    procsets = self._sql.get_proc_labels(),
-                                    window_title=window_title)
-            window.resize(800, 600)
-            window.show()
-
-            def handle_about_to_quit():
-                #points = window.get_points()
-                pass
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
-
-        plt.close('all')
-
-    def gui_view(self, attr='', procset = None, use_windows = False):
-        """show interactive plots and swipe through them"""
-
-        if attr not in ['geometry','geom','seismogram','','spectrogram',
-                        'spectra','spectrogramComposite','FK','SFR','dispersionImage','FV']:
-            self.logger.error(f'AttributeError: {attr} does not exist.')
-            pass
-
-        window_title = 'SWA - Figure Viewer'
-        DataSwitcher = DataSwitcherBase
-
-        if use_windows:
-            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
-                                        procset=procset,
-                                        procsets=self._sql.get_proc_labels(),
-                                        window_title=window_title)
-            window.resize(800, 600)
-            window.show()
-
-            def handle_about_to_quit():
-                window.clean()
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
-
-        else:
-            window = DataSwitcher(self.data, self._sql, plot=attr,
-                                    procset = procset,
-                                    procsets = self._sql.get_proc_labels(),
-                                    window_title=window_title)
-            window.resize(800, 600)
-            window.show()
-
-            def handle_about_to_quit():
-                #points = window.get_points()
-                pass
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
-
-        plt.close('all')
-
-    # TODO:
     def plot_curve(self, procset=None, method='phaseshift',
                    dc_mode=0, use_windows = False, **kwargs):
         """plot a dispersion curve"""
@@ -793,12 +689,17 @@ class BaseManager:
                     self.plot_curve(procset=procset, method = method,
                                        dc_mode=dc_mode, use_windows=use_windows,**kwargs)
 
-    def plot_pseusodsection(self, procset=None, method=None,
-                            dc_mode=0, cmap='viridis', axes = None, **kwargs):
+    def plot_pseudosection(self, procset=None, **kwargs):
         """plot the Rayleigh wave phase velocity pseudosection"""
 
         if procset is None:
             procset = self._procset
+
+        method = kwargs.pop('method','phaseshift')
+        dc_mode = kwargs.pop('dc_mode',0)
+        cmap = kwargs.pop('cmap','viridis')
+        show = kwargs.pop('show', True)
+        axes = kwargs.pop('axes',None)
 
         _, recs_all = self._sql.get_geometry(sin = '*')
         params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode}
@@ -841,12 +742,121 @@ class BaseManager:
             ax.set_title(title)
             if outfile:
                 fig.savefig(outfile)
-                plt.close()
-            else:
-                if axes is None:
-                    plt.show()
+
+            if show:
+                plt.tight_layout()
+                plt.show()
+
+            return ax
+
         else:
-            warnings.warn('No dispersion curves in data base. Pseudosection not visualised')
+            self.logger.warning('No dispersion curves in data base. Pseudosection not visualised')
+
+            return None
+
+    def plot(self, attr='seismogram', procset = None, use_windows = False, **kwargs):
+        """plot portions of the stream data"""
+
+        if attr == 'pseudosection':
+            ax = self.plot_pseudosection(procset, **kwargs)
+            return ax
+
+        if attr == 'curve':
+            ax = self.plot_curve(procset, **kwargs)
+            return ax
+
+        self._plot(attr,procset,use_windows,**kwargs)
+
+    # TODO save point list or something?
+    def gui_interact(self, attr='', procset = None, use_windows = False,**kwargs):
+        """show interactive plots and interact with them"""
+
+        if attr not in ['seismogram','','spectrogram','spectra','FK','SFR','dispersionImage','FV']:
+            self.logger.error(f'AttributeError: {attr} does not exist.')
+            pass
+
+        window_title = 'SWA - Interactive Figure Viewer'
+
+        if attr in ['', 'seismogram']:
+            DataSwitcher = DataSwitcherFilterSeis
+        elif attr in ['dispersionImage', 'FV']:
+            DataSwitcher = DataSwitcherPick
+        elif attr == 'FK':
+            DataSwitcher = DataSwitcherFilterFK
+        else:
+            DataSwitcher = DataSwitcherBase
+
+        if use_windows:
+            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
+                                        procset=procset,
+                                        procsets=self._sql.get_proc_labels(),
+                                        window_title=window_title,**kwargs)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                window.clean()
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        else:
+            window = DataSwitcher(self.data, self._sql, plot=attr,
+                                    procset = procset,
+                                    procsets = self._sql.get_proc_labels(),
+                                    window_title=window_title,**kwargs)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                #points = window.get_points()
+                pass
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        plt.close('all')
+
+    def gui_view(self, attr='', procset = None, use_windows = False,**kwargs):
+        """show interactive plots and swipe through them"""
+
+        if attr not in ['seismogram','','spectrogram','spectra','FK','SFR','dispersionImage','FV', 'curve']:
+            self.logger.error(f'AttributeError: {attr} does not exist.')
+            pass
+
+        window_title = 'SWA - Figure Viewer'
+        DataSwitcher = DataSwitcherBase
+
+        if use_windows:
+            window = DualFigureSwitcher(self.data, self._sql, plot=attr, DataSwitcher=DataSwitcher,
+                                        procset=procset,
+                                        procsets=self._sql.get_proc_labels(),
+                                        window_title=window_title,**kwargs)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                window.clean()
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        else:
+            window = DataSwitcher(self.data, self._sql, plot=attr,
+                                    procset = procset,
+                                    procsets = self._sql.get_proc_labels(),
+                                    window_title=window_title,**kwargs)
+            window.resize(800, 600)
+            window.show()
+
+            def handle_about_to_quit():
+                #points = window.get_points()
+                pass
+
+            self.app.aboutToQuit.connect(handle_about_to_quit)
+            self.app.exec()
+
+        plt.close('all')
 
 
 class MASW2DManager(BaseManager):
@@ -885,7 +895,13 @@ class MASW2DManager(BaseManager):
 
     def plot(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """plot the stream data"""
-        self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
+
+        if attr == 'pseudosection':
+            ax = self.plot_pseudosection(procset, **kwargs)
+            return ax
+
+        else:
+            self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
 
     def preprocess_streams(self, attr='trim', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """apply preprocessing steps to current selection or all data sets"""
@@ -1067,8 +1083,8 @@ class MASW2DManager(BaseManager):
         if procset is None:
             procset = self._procset
 
-        dir = os.path.join(self.prjdir, f'proc/{procset}/{method}')
-        path2geom = os.path.join(dir, '1_geom')
+        dir = os.path.join(self.prjdir, f'03_proc/{procset}/{method}')
+        path2geom = os.path.join(dir, '02_geom')
         safe_makedirs(path2geom)
 
         xmids = []
@@ -1310,7 +1326,7 @@ class MASW2DManager(BaseManager):
         for i, xmid in enumerate(xmids):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
-            self._save_curve(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+            self._save_dc(path2dc, 'dc%d' % i, params, format=format, **kwargs)
 
 
 class Tomo2DManager(BaseManager):
@@ -1350,7 +1366,12 @@ class Tomo2DManager(BaseManager):
 
     def plot(self, attr='seismogram', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """plot the stream data"""
-        self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
+
+        if attr == 'pseudosection':
+            ax = self.plot_pseudosection(procset, **kwargs)
+            return ax
+        else:
+            self.plot_streams(attr,procset,apply_to,use_windows,**kwargs)
 
     def prepare_streams(self, min_offset, max_offset, min_rec = 6, procset = None):
         """retrieve subsets of the data based on forward and reverse offset shots"""
@@ -1665,10 +1686,6 @@ class Tomo2DManager(BaseManager):
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
 
             self._process_curve(attr, params, method = 'tomo2D', procset=procset, **kwargs)
-            curve_data = self._sql.read_curve(params)
-            dc = DispersionCurve()
-            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            dc.plot(**kwargs)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
@@ -1707,8 +1724,8 @@ class Tomo2DManager(BaseManager):
         xmids = curves['xmid'].unique()
 
         # save the receiver spread midpoints
-        path2dc = os.path.join(self.prjdir, f'proc/{procset}/{method}')
-        path2geom = os.path.join(path2dc, '1_geom')
+        path2dc = os.path.join(self.prjdir, f'03_proc/{procset}/{method}')
+        path2geom = os.path.join(path2dc, '02_geom')
         safe_makedirs(path2geom)
         np.savetxt(os.path.join(path2geom,'xmid.txt'), xmids)
 
@@ -1717,7 +1734,8 @@ class Tomo2DManager(BaseManager):
 
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode,'xmid': xmid}
-            self._save_curve(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
+            self._save_dc(path2dc, 'dc%d' % i, params, format=format, **kwargs)
 
     def save(self, procset=None, method='tomo2D', dc_mode=0, format = 'csv', **kwargs):
         """save the dispersion curves based on receiver spread midpoint"""

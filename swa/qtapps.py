@@ -1,11 +1,13 @@
 import copy
-from .utils import *
-from .interactive import *
+from .utils.utils import *
+from .utils.interactive import *
+from .curve import DispersionCurve
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
                              QLabel, QComboBox)
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 # TODO fail safe for selecting transformation method [check]
 # TODO dual view to process windows and whole set (plot geometry on top?) [check]
@@ -16,7 +18,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 # TODO spyder close event
 
 class DualFigureSwitcher(QMainWindow):
-    def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None, procsets = None, window_title = "SWA Viewer"):
+    def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None,
+                 procsets = None, window_title = "SWA Viewer",**kwargs):
         super().__init__()
 
         self.setWindowTitle(window_title)
@@ -30,12 +33,12 @@ class DualFigureSwitcher(QMainWindow):
             DataSwitcher = DataSwitcherBase
 
         # Viewer 1: controls the index
-        self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets)
+        self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets,**kwargs)
         self.viewer1.setFixedSize(400, 600)
 
         # Viewer 2: shows groups of figures based on viewer1's index
         self.viewer2 = DataSwitcher(data, sql, plot = plot, use_windows=True, procset = procset, procsets = procsets,
-                                    window_label = 'WINDOWS')
+                                    window_label = 'WINDOWS',**kwargs)
         self.viewer2.setFixedSize(800, 600)
 
         layout.addWidget(self.viewer1)
@@ -48,7 +51,7 @@ class DualFigureSwitcher(QMainWindow):
     def clean(self):
         self.viewer1.clean()
         self.viewer2.clean()
-        
+
     def closeEvent(self, event):
         self.viewer1.closeEvent(event)
         self.viewer2.closeEvent(event)
@@ -138,6 +141,12 @@ class DataSwitcherBase(QWidget):
         vel, kw, freq, FV = self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
         return vel, kw, freq, FV
 
+    def _get_curve(self, sin, rep, procset, wid=-1, method='phaseshift'):
+        """get the curve data"""
+        params = {'procset': "'%s'" % procset, 'method': "'%s'" % method,
+                  'sin': sin, 'rep': rep, 'wid': wid}
+        return self._sql.read_curve(params)
+
     def _set_data(self, data, sin, rep, procset, wid=-1):
         """set processed data from database to current stream"""
 
@@ -206,6 +215,29 @@ class DataSwitcherBase(QWidget):
         if plot in ['dispersionImage', 'dispersionImageComposite', 'FV', 'FVComposite']:
             FV_flag = self._set_FV(self.stream, label[0],label[1], self.procset, method=self.method, wid=label[2])
             self.data_exists = self.data_exists & FV_flag
+
+        if plot == 'curve':
+            curves = self._get_curve(label[0],label[1], self.procset, wid=label[2],
+                                         method=kwargs.pop('method','phaseshift'))
+            if not curves.empty:
+
+                dc_modes = curves['dc_mode'].unique()
+
+                cmap = getattr(plt.cm, 'Greys')
+                color = cmap(np.linspace(0, 1, 10))
+
+                fig = Figure(figsize=(8, 8), constrained_layout=True)
+                ax = fig.add_subplot(111)
+
+                for dc_mode in dc_modes:
+                    curve = curves[curves['dc_mode'] == dc_mode]
+                    dc = DispersionCurve()
+                    dc.init_data(curve['frequency'], curve['velocity'], curve['error'])
+                    ax = dc.plot(show=False,axes = ax, color = color[dc_mode],
+                                 edgecolor = 'k', label = f'Mode {dc_mode}', **kwargs)
+                return ax.figure
+
+            return None
 
         if self.data_exists:
             return self.stream.plot(plot, show=False, gui = True, **self.kwargs, **kwargs)
@@ -406,9 +438,9 @@ class DataSwitcherBase(QWidget):
 
     def clean(self):
         pass
-    
+
     def closeEvent(self, event):
-        
+
         if hasattr(self, 'canvas'):
             self.canvas.setParent(None)
             self.canvas.close()

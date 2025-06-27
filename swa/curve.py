@@ -282,7 +282,7 @@ class DispersionCurve:
             if parkseis_params is not None:
                 safe_makedirs(os.path.join(prjdir, "0_DC"))
 
-                outfile = prjdir + f"/0_DC/{pre}.DC"
+                outfile = prjdir + f"/01_DC/{pre}.DC"
 
                 f = data.f.values
                 vel = data.vel.values
@@ -306,7 +306,9 @@ class DispersionCurve:
         alpha = kwargs.pop('alpha',0.7)
         marker = kwargs.pop('marker','o')
         marker_size = kwargs.pop('size',20)
-        axis_style = kwargs.pop('axis_style', True)
+        axis_style = kwargs.pop('axis_style', False)
+        figsize = kwargs.pop('figsize',(8,8))
+        edgecolor = kwargs.pop('edgecolor',color)
 
         if keyy == 'vr':
             err = data.err.values
@@ -325,7 +327,7 @@ class DispersionCurve:
             raise KeyError
 
         if axes is None:
-            fig, ax = plt.subplots(figsize=(6, 4))
+            fig, ax = plt.subplots(figsize=figsize, constrained_layout = True)
         else:
             ax = axes
             fig = ax.figure
@@ -346,7 +348,7 @@ class DispersionCurve:
             ax.fill_between(x=data_orig[keyx], y1=data_orig[keyy] - err_orig, y2=data_orig[keyy] + err_orig, alpha=0.1,
                             color='k', linewidth=2, edgecolor=None)
 
-        ax.scatter(data[keyx], data[keyy], marker=marker, s=marker_size, c=color, edgecolor=color,
+        ax.scatter(data[keyx], data[keyy], marker=marker, s=marker_size, c=color, edgecolor=edgecolor,
                    linewidth=0.8, zorder=2, label = label,alpha = alpha)
 
         if (np.sum(err) != 0) & kwargs.setdefault('showErr', False):
@@ -354,13 +356,16 @@ class DispersionCurve:
             ax.fill_between(x = data[keyx], y1 = data.vr - err, y2 =  data.vr + err, alpha = 0.2,
                             color = color, linewidth = 2, edgecolor = None, label = 'data error')
 
+        ax.grid(True, linestyle=':')
+
+        if label:
+            ax.legend(loc='upper right', edgecolor='k', frameon=True, fontsize=kwargs.setdefault('fontsize', 12))
+
+        ax.set_xlabel(labelx)
+        ax.set_ylabel(labely)
+
         # configure styling
         if axis_style:
-            ax.grid(True, linestyle=':')
-            if label:
-                ax.legend(loc='upper right', edgecolor = 'k', frameon = True,fontsize = kwargs.setdefault('fontsize',12))
-            ax.set_xlabel(labelx)
-            ax.set_ylabel(labely)
 
             plt_xmin = kwargs.pop('xmin',np.min(data[keyx]))
             plt_xmax = kwargs.pop('xmax',np.max(data[keyx]))
@@ -369,6 +374,7 @@ class DispersionCurve:
             plt_ymax = kwargs.pop('ymax',np.max(data[keyy])+np.max(err))
 
             ax.set_ylim([plt_ymin,plt_ymax])
+
             if self.data_orig is not None:
                 data_orig = self.data_orig.copy()
                 ax.set_xlim([np.min(data_orig[keyx])-2.5, np.max(data_orig[keyx])+2.5])
@@ -377,8 +383,6 @@ class DispersionCurve:
 
         if axes is not None:
             return ax
-
-        plt.tight_layout()
 
         if outfile:
             if fmt:
