@@ -110,6 +110,7 @@ class DataSwitcherBase(QWidget):
 
         if not self.methods:
             self.method = "phaseshift"
+            self.methods = [self.method]
         else:
             self.method = self.methods[0]
 
@@ -169,7 +170,7 @@ class DataSwitcherBase(QWidget):
             self.logger.warning(f'Wave-field transformation not yet performed. Running {method} transformation.')
             data.transform(method = method)
             self._write_FV(data, sin, rep, procset, wid=wid)
-            self.update_display()
+            #self.update_display()
         return True
 
     # data selection
