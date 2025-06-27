@@ -228,7 +228,7 @@ class BaseManager:
             self.logger.warning('Procset label needs to be a string.')
 
         elif not procset in self._sql.get_proc_labels():
-            self.logger.warning('Procset does not exist.')
+            self.logger.warning(f'Procset {procset} does not exist.')
 
         else:
             self._loadset = procset
@@ -492,23 +492,24 @@ class BaseManager:
 
         curve_data = self._sql.read_curve(params)
 
-        dc = DispersionCurve()
-        dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-        func = getattr(dc, attr)
-        dc = func(**kwargs)
+        if not curve_data.empty:
+            dc = DispersionCurve()
+            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+            func = getattr(dc, attr)
+            dc = func(**kwargs)
 
-        xmids = curve_data['xmid'].unique()#item()
+            xmids = curve_data['xmid'].unique()#item()
 
-        for xmid in xmids:
-            dc = {
-                'xmid': xmid,
-                'method': method,
-                'dc_mode': params['dc_mode'],
-                'f': dc.frequency,
-                'v': dc.velocity,
-                'err': dc.error}
+            for xmid in xmids:
+                dc = {
+                    'xmid': xmid,
+                    'method': method,
+                    'dc_mode': params['dc_mode'],
+                    'f': dc.frequency,
+                    'v': dc.velocity,
+                    'err': dc.error}
 
-            self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
+                self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
 
     def process_curve(self, attr, procset=None, method = None,
                       dc_mode=0, use_windows = False, **kwargs):
@@ -1096,7 +1097,7 @@ class MASW2DManager(BaseManager):
 
             starttime = time.time()
             print(f'Save dispersion curves corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
-                  f' to file ..... ', end = '')
+                  f' to "{dir}" ..... ', end = '')
             xmid = self._save(procset=procset, method = method,dc_mode=dc_mode,
                                    use_windows=use_windows, **kwargs)
             xmids += xmid
@@ -1113,7 +1114,7 @@ class MASW2DManager(BaseManager):
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
                     sys.stdout.write(f'\rSave dispersion curves corresponding to (SIN,REP) = '
-                          f'({sin}, {rep}) to file ..... ')
+                          f'({sin}, {rep}) to "{dir}" ..... ')
                     sys.stdout.flush()
 
                     xmid = self._save(procset=procset, method = method,dc_mode=dc_mode,
@@ -1319,6 +1320,10 @@ class MASW2DManager(BaseManager):
         # save the receiver spread midpoints
         path2dc = os.path.join(self.prjdir, f'proc/{procset}/{method}')
         path2geom = os.path.join(path2dc, '1_geom')
+
+        starttime = time.time()
+        print(f'Saving disperion curves to "{path2dc}" ..... ', end='')
+
         safe_makedirs(path2geom)
         np.savetxt(os.path.join(path2geom, 'xmid.txt'), xmids)
 
@@ -1327,6 +1332,9 @@ class MASW2DManager(BaseManager):
             params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                       'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
             self._save_dc(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
 
 
 class Tomo2DManager(BaseManager):
@@ -1726,6 +1734,10 @@ class Tomo2DManager(BaseManager):
         # save the receiver spread midpoints
         path2dc = os.path.join(self.prjdir, f'03_proc/{procset}/{method}')
         path2geom = os.path.join(path2dc, '02_geom')
+
+        starttime = time.time()
+        print(f'Saving disperion curves to "{path2dc}" ..... ', end='')
+
         safe_makedirs(path2geom)
         np.savetxt(os.path.join(path2geom,'xmid.txt'), xmids)
 
@@ -1736,6 +1748,10 @@ class Tomo2DManager(BaseManager):
                       'method': "'%s'" % method, 'dc_mode': dc_mode,'xmid': xmid}
 
             self._save_dc(path2dc, 'dc%d' % i, params, format=format, **kwargs)
+
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
+
 
     def save(self, procset=None, method='tomo2D', dc_mode=0, format = 'csv', **kwargs):
         """save the dispersion curves based on receiver spread midpoint"""
