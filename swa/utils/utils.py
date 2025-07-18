@@ -190,6 +190,10 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
         ngeo = stream.nchannels                     # number of geophones
         nids += ngeo
 
+        if len(np.unique(receiver)) != ngeo:
+            raise ValueError('Unique geophone coordinates does not match expected number of geophones. '
+                             f'{len(np.unique(receiver))} != {ngeo}')
+
         df = pd.DataFrame({'x':receiver,
                            'y': 0,
                            'z': 0,

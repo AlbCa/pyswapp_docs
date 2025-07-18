@@ -163,6 +163,7 @@ class SeismicStream:
     #     else:
     #         raise NotImplementedError("File format not supported.")
 
+    # TODO check if data contains coordinate information
     def _read_sg2_geom(self, fname, channel_nr):
         """
         Read stream data with .sg2 file format with geometry information in header
@@ -2285,16 +2286,19 @@ class SeismicStream:
         source = self.source
 
         # window settings
+        # minimum offset (m)
         if 'minoffset' in kwargs:
             minoffset = kwargs['minoffset']
         else:
             minoffset = self.wmino
 
+        # maximum offset (m)
         if 'maxoffset' in kwargs:
             maxoffset = kwargs['maxoffset']
         else:
             maxoffset = self.wmaxo
 
+        # move increment (number of traces to skip between windows)
         if 'wmove' in kwargs:
             win_move = kwargs['wmove']
         else:
@@ -2302,6 +2306,7 @@ class SeismicStream:
 
         mintrace = 0
 
+        # window length (number of traces)
         if 'wlen' in kwargs:
             maxtrace = kwargs['wlen']
         else:
@@ -2346,12 +2351,12 @@ class SeismicStream:
 
         return windows
 
-    def preprocess_windows(self, windows, attr = 'filter', **kwargs):
+    def preprocess_windows(self, windows, type = 'filter', **kwargs):
         """run a preprocessing step on all windows"""
 
         processed_windows = {}
         for win_id, win in windows.items():
-            func = getattr(win, attr)
+            func = getattr(win, type)
             func(**kwargs)
             processed_windows[win_id] = win
 
@@ -2440,42 +2445,42 @@ class SeismicStream:
         return norm_power
 
     # %% PLOTTING
-    def plot(self,attr = '',**kwargs):
+    def plot(self,type = '',**kwargs):
         """Create static plots"""
 
-        if attr == 'geometry' or attr == 'geom':
+        if type == 'geometry' or type == 'geom':
             fig = self._plotGeometry(**kwargs)
             return fig
-        elif attr == 'seismogram' or attr == '':
+        elif type == 'seismogram' or type == '' or type == 'TX':
             fig = self._plotSeismogram(**kwargs)
             return fig
-        elif attr == 'spectrogram':
+        elif type == 'spectrogram' or type == 'FX':
             fig = self._plotSpectrogram(**kwargs)
             return fig
-        elif attr == 'spectra':
+        elif type == 'spectra':
             fig = self._plotSpectra(**kwargs)
             return fig
-        elif attr == 'spectrogramComposite':
+        elif type == 'spectrogramComposite':
             fig = self._plotSpectrogramComposite(**kwargs)
             return fig
-        elif attr == 'FK':
+        elif type == 'FK':
             fig = self._plotFK(**kwargs)
             return fig
-        elif attr == 'SFR':
+        elif type == 'SFR':
             fig = self._plotSFR(**kwargs)
             return fig
-        elif attr == 'dispersionImage' or attr == 'FV':
+        elif type == 'dispersionImage' or type == 'FV':
             fig = self._plotDispersionImage(**kwargs)
             return fig
-        elif attr == 'dispersionImageComposite' or attr == 'FVComposite':
+        elif type == 'dispersionImageComposite' or type == 'FVComposite':
             fig = self._plotDispersionImageComposite(**kwargs)
             return fig
-        elif attr == 'geomShort':
+        elif type == 'geomShort':
             fig = self._plotGeomShort()
             return fig
 
         else:
-            self.logger.error(f'Invalid attribute "{attr}".')
+            self.logger.error(f'Invalid attribute "{type}".')
 
     def _plotGeomShort(self):
         """plot acquisition setup of shot file"""
@@ -2591,10 +2596,15 @@ class SeismicStream:
             else:
                 st = self._pst.copy()
 
+        try:
+            receiver = self.receiver
+        except AttributeError:
+            receiver = np.arange(1,len(st)+1,1)
+
         color = kwargs.pop('color', 'dimgrey')
         linewidth = kwargs.pop('linewidth', 0.5)
         title = kwargs.pop('title', f'Shotfile {self.pre}')
-        step = kwargs.pop('tick_scale', len(self.receiver)//3)
+        step = kwargs.pop('tick_scale', len(receiver)//3)
         alpha = kwargs.pop('alpha',0.5)
         show_map = kwargs.pop('show_map', False)
 
@@ -2605,15 +2615,15 @@ class SeismicStream:
 
         nchannels, npts = amps.shape
 
-        t = np.arange(npts) * self.dt
+        t = np.arange(npts) * st[0].stats.delta
 
         if amp_scale is None:
-            amp_scale = np.mean(np.diff(np.array(self.receiver))) / 2
+            amp_scale = np.mean(np.diff(np.array(receiver))) / 2
 
         if amp_scale == 0:
             amp_scale = 1
 
-        for i, pos in enumerate(self.receiver):
+        for i, pos in enumerate(receiver):
             amps[i] = amps[i] * amp_scale
 
         if show_map:
@@ -2648,16 +2658,15 @@ class SeismicStream:
 
         ax.set_xlim(-2,(len(amps)-1)+2)
 
-        offsets = self.receiver
-        xticks = np.arange(len(offsets))[step - 1::step]
-        ax.set_xticks(np.arange(len(offsets))[step - 1::step])
+        xticks = np.arange(len(receiver))[step - 1::step]
+        ax.set_xticks(np.arange(len(receiver))[step - 1::step])
 
         if kwargs.pop('show_xticks',True):
 
             ax.xaxis.tick_top()
             xticklabels = []
             for i in xticks:
-                xticklabels.append(f'{st[i].stats.channel}\n{offsets[i]}')
+                xticklabels.append(f'{st[i].stats.channel}\n{receiver[i]}')
             ax.set_xticklabels(xticklabels)
 
             text = 'channel:\nx (m):'
@@ -2671,15 +2680,10 @@ class SeismicStream:
         else:
             xticklabels = []
             for i in xticks:
-                xticklabels.append(f'{offsets[i]}')
+                xticklabels.append(f'{receiver[i]}')
             ax.set_xticklabels(xticklabels)
             ax.set_xlabel('x (m)')
             ax.locator_params(axis='x', nbins=4)
-            # ax.tick_params(
-            #     axis='x',
-            #     which='both',
-            #     bottom=False,
-            #     labelbottom=False)
 
         ymin = kwargs.pop('ymin', np.min(t))
         ymax = kwargs.pop('ymax', np.max(t))

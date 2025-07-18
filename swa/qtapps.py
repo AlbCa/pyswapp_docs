@@ -15,11 +15,74 @@ from matplotlib.figure import Figure
 # TODO filtering in seismogram [done]
 # TODO deactivate interaction when viewing raw
 # TODO save picks??
-# TODO spyder close event
+# TODO spyder close event [done]
+# TODO pick dc in FK plot
 
-class DualFigureSwitcher(QMainWindow):
+class FigureSwitcher(QMainWindow):
+    def __init__(self, figures):
+        super().__init__()
+        self.setWindowTitle("Data Preview Mode")
+
+        self.figures = figures
+        self.current_index = 0
+
+        self.init_ui()
+
+    def init_ui(self):
+        # Main widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Layouts
+        main_layout = QVBoxLayout()
+        nav_layout = QHBoxLayout()
+        main_layout.addLayout(nav_layout)
+        central_widget.setLayout(main_layout)
+
+        # Navigation buttons
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        self.left_btn.setFixedSize(40, 40)
+
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        self.right_btn.setFixedSize(40, 40)
+
+        nav_layout.addWidget(self.left_btn)
+        nav_layout.addWidget(self.right_btn)
+        nav_layout.addStretch()
+
+        self.left_btn.clicked.connect(self.show_previous_figure)
+        self.right_btn.clicked.connect(self.show_next_figure)
+
+        # Canvas for figure
+        self.canvas = FigureCanvas(self.figures[self.current_index])
+        main_layout.addWidget(self.canvas)
+
+    def show_previous_figure(self):
+        if self.current_index > 0:
+            self.current_index -= 1
+            self.update_figure()
+        else:
+            self.current_index = len(self.figures) - 1
+            self.update_figure()
+
+    def show_next_figure(self):
+        if self.current_index < len(self.figures) - 1:
+            self.current_index += 1
+            self.update_figure()
+        else:
+            self.current_index = 0
+            self.update_figure()
+
+    def update_figure(self):
+        self.canvas.setParent(None)
+        self.canvas = FigureCanvas(self.figures[self.current_index])
+        self.centralWidget().layout().addWidget(self.canvas)
+
+class DualDataSwitcher(QMainWindow):
     def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None,
-                 procsets = None, window_title = "SWA Viewer",**kwargs):
+                 procsets = None, window_title = "SWA Viewer",select_plot = True, **kwargs):
         super().__init__()
 
         self.setWindowTitle(window_title)
@@ -33,11 +96,13 @@ class DualFigureSwitcher(QMainWindow):
             DataSwitcher = DataSwitcherBase
 
         # Viewer 1: controls the index
-        self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets,**kwargs)
+        self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets,
+                                        select_plot = select_plot, **kwargs)
         self.viewer1.setFixedSize(400, 600)
 
         # Viewer 2: shows groups of figures based on viewer1's index
         self.viewer2 = DataSwitcher(data, sql, plot = plot, use_windows=True, procset = procset, procsets = procsets,
+                                        select_plot = select_plot,
                                     window_label = 'WINDOWS',**kwargs)
         self.viewer2.setFixedSize(800, 600)
 
@@ -47,6 +112,7 @@ class DualFigureSwitcher(QMainWindow):
         # Link left to right
         self.viewer1.index_changed.connect(self.viewer2.set_group)
         self.viewer1.procset_changed.connect(self.viewer2.load_procset)
+        self.viewer1.plot_changed.connect(self.viewer2.load_plot)
 
     def clean(self):
         self.viewer1.clean()
@@ -56,19 +122,29 @@ class DualFigureSwitcher(QMainWindow):
         self.viewer1.closeEvent(event)
         self.viewer2.closeEvent(event)
 
+
 class DataSwitcherBase(QWidget):
     index_changed = pyqtSignal(int)
     procset_changed = pyqtSignal(str)
+    plot_changed = pyqtSignal(str)
 
-    def __init__(self, data, sql, plot = 'seismogram', use_windows=False, interaction_class=None,
+    def __init__(self, data, sql, plot = 'TX', use_windows=False, interaction_class=None,
                  procset = None, procsets = None,
-                 btn_label = 'Click me', window_label = 'SHOTFILES', window_title = 'SWA Viewer', **kwargs):
+                 btn_label = 'Click me', window_label = 'SHOTFILES', window_title = 'SWA Viewer',select_plot = True,
+                 **kwargs):
         super().__init__()
 
         self.logger = create_logging(name='GUI')
 
         self.data = data
-        self.plot = plot
+
+        if not plot:
+            self.plot = 'TX'
+        else:
+            self.plot = plot
+        self.plots = ['TX','FX','spectra','SFR','FK','FV','DC']
+        self.select_plot = select_plot
+
         self.stream = None
         self.canvas0 = FigureCanvas()
         self.canvas = FigureCanvas()
@@ -217,7 +293,7 @@ class DataSwitcherBase(QWidget):
             FV_flag = self._set_FV(self.stream, label[0],label[1], self.procset, method=self.method, wid=label[2])
             self.data_exists = self.data_exists & FV_flag
 
-        if plot == 'curve':
+        if plot == 'DC':
             curves = self._get_curve(label[0],label[1], self.procset, wid=label[2],
                                          method=kwargs.pop('method','phaseshift'))
             if not curves.empty:
@@ -254,6 +330,7 @@ class DataSwitcherBase(QWidget):
         combo = QComboBox()
         combo.addItems(sets)
         combo.setFixedSize(90, 40)
+
         if len(sets) > 0:
             try:
                 combo.setCurrentIndex(list(sets).index(set))
@@ -279,28 +356,29 @@ class DataSwitcherBase(QWidget):
         self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
         self.right_btn.setFixedSize(40, 40)
 
-        if not self.is_grouped and self.procset is not None:
-            # Dropdown menu to select procset
-            self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
-            self.combo.currentTextChanged.connect(self.load_procset)
-
         # SIN/REP/WIN index
         self.label = QLabel()
         self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        self.nav_layout.addWidget(self.left_btn)
+        self.nav_layout.addWidget(self.right_btn)
+
+        # Dropdown menu to select procset
+        if not self.is_grouped and self.procset is not None:
+            self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.load_procset)
+            self.nav_layout.addWidget(self.combo)
+
+        # Dropdown menu to select plot
+        if not self.is_grouped and self.select_plot:
+            self.combo_plots = self.add_combobox("PLOT:", self.plots, self.plot)
+            self.combo_plots.currentTextChanged.connect(self.load_plot)
+            self.nav_layout.addWidget(self.combo_plots)
 
         # Interaction buttons
         if self.interaction_class:
             self.interact_btn = QPushButton(self.btn_label)
             self.interact_btn.setFixedSize(100, 40)
-
-        self.nav_layout.addWidget(self.left_btn)
-        self.nav_layout.addWidget(self.right_btn)
-
-        if not self.is_grouped and self.procset is not None:
-            #self.nav_layout.addWidget(self.dropdown_label)
-            self.nav_layout.addWidget(self.combo)
-
-        if self.interaction_class:
             self.nav_layout.addWidget(self.interact_btn)
 
         self.nav_layout.addStretch()
@@ -437,6 +515,11 @@ class DataSwitcherBase(QWidget):
         self.procset_changed.emit(procset)
         self.update_display()
 
+    def load_plot(self, plot):
+        self.plot = plot
+        self.plot_changed.emit(plot)
+        self.update_display()
+
     def clean(self):
         pass
 
@@ -449,15 +532,16 @@ class DataSwitcherBase(QWidget):
         event.accept()
         plt.close('all')
 
+
 class DataSwitcherPick(DataSwitcherBase):
 
     def __init__(self, data, sql, plot = 'FV', use_windows=False,
-                 procset = None, procsets = None, **kwargs):
+                 procset = None, procsets = None,select_plot = True, **kwargs):
 
         interaction_class = DCPickingInteractive
 
         super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
-                 procset = procset, procsets = procsets, btn_label = 'Extract Curve', **kwargs)
+                 procset = procset, procsets = procsets, btn_label = 'Extract Curve', select_plot = select_plot, **kwargs)
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
@@ -575,7 +659,7 @@ class DataSwitcherPick(DataSwitcherBase):
 class DataSwitcherFilterSeis(DataSwitcherBase):
 
     def __init__(self, data, sql, plot = '', use_windows=False,
-                 procset=None, procsets=None, **kwargs):
+                 procset=None, procsets=None,select_plot = True, **kwargs):
 
         if plot == 'FK':
             interaction_class = FKFilterInteractive
@@ -585,7 +669,7 @@ class DataSwitcherFilterSeis(DataSwitcherBase):
             raise NotImplementedError
 
         super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
-                 procset = procset, procsets = procsets, btn_label='Filter | Reset', **kwargs)
+                 procset = procset, procsets = procsets, btn_label='Filter | Reset', select_plot = select_plot, **kwargs)
 
     # TODO there is probably a much better way than this ....
     def interact(self):
@@ -621,14 +705,14 @@ class DataSwitcherFilterSeis(DataSwitcherBase):
 class DataSwitcherFilterFK(DataSwitcherBase):
 
     def __init__(self, data, sql, plot = 'FK', use_windows=False,
-                 procset=None, procsets=None, **kwargs):
+                 procset=None, procsets=None,select_plot = True, **kwargs):
 
         interaction_class = FKFilterInteractive
         self.canvas1 = FigureCanvas()
         self.seis_kwargs = {'show_xticks':False,'title':None, 'figsize': (7.2,8)}
 
         super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
-                 procset = procset, procsets = procsets, btn_label='Filter | Reset', **kwargs)
+                 procset = procset, procsets = procsets, btn_label='Filter | Reset',select_plot = select_plot, **kwargs)
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)

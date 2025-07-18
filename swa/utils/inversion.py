@@ -34,7 +34,7 @@ def compute_chi2(data, resp, error):
     chi2 = np.mean(error_weighted_misfit ** 2)
     return rms, rrms, chi2
 
-
+# TODO Ausgleichstest, Anzahl an Freiheitsgraden
 def tomo2D_phasediff(lam,f,A,dphi,w):
     """
     Tomographic like approach (Barone et al., 2019)
@@ -66,5 +66,7 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
 
     phi_vel = -2*np.pi*f/m
     phi_model = A@m
+
+    print('nf = ', len(dphi)-len(m))
 
     return phi_vel, phi_model
