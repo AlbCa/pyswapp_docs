@@ -33,33 +33,22 @@ class SQL:
         #con = None
         self.database = database
         #
-        # self._init_connection()
+        # self._connect()
 
     def get_connection(self):
         con = sqlite3.connect(self.database)
         con.create_aggregate("STDEV", 1, StdevFunc)
         return con
 
-    # def _init_connection(self):
-    #
-    #     if con:
-    #         print('helllooo')
-    #         try:
-    #             self._disconnect()
-    #         except:
-    #             pass
-    #
-    #     connect(name=self.database)
-    #     con.create_aggregate("STDEV", 1, StdevFunc)
-    #
-    # def _connect(self,name = 'name.db'):
-    #     """Create a connection to a SQL database"""
-    #     con = sqlite3.connect(name)
-    #
-    # def _disconnect(self):
-    #     """Close the connection to a SQL database"""
-    #     con.close()
-    #     con = None
+    def _connect(self):
+        """Create a connection to a SQL database"""
+        self.con = sqlite3.connect(self.database)
+        self.con.create_aggregate("STDEV", 1, StdevFunc)
+
+    def _disconnect(self):
+        """Close the connection to a SQL database"""
+        self.con.close()
+        self.con = None
 
     def _create_table(self, name, columns, types):
         """Create a sql table"""
@@ -234,12 +223,18 @@ class SQL:
         labels = self.read_sql(sql)['procset'].values
         return labels
 
-    def get_trafo_labels(self,procset):
+    def get_trafo_labels(self,procset, use_windows = False):
 
         if 'FV' in self.get_tables():
-            sql = """SELECT DISTINCT method
-                     FROM FV WHERE procset=='%s'""" % procset
-            labels = self.read_sql(sql)['method'].values
+
+            if use_windows:
+                sql = """SELECT DISTINCT method
+                         FROM FV WHERE procset=='%s' AND wid != -1""" % procset
+                labels = self.read_sql(sql)['method'].values
+            else:
+                sql = """SELECT DISTINCT method
+                         FROM FV WHERE procset=='%s' AND wid == -1""" % procset
+                labels = self.read_sql(sql)['method'].values
             return labels
 
         return []
@@ -372,6 +367,7 @@ class SQL:
         pid_df.insert(1, 'wid', wid)
 
         params = {'sin':sin, 'rep':rep, 'procset': "'%s'" % procset, 'wid':wid}
+
         # add tables to database or replace if exists
         if self.check_data('amps',params):
             self.to_sql(df,name = 'amps', if_exists = 'append', index = False)
@@ -499,7 +495,6 @@ class SQL:
             self.delete_data(tn,params)
             self.to_sql(df, name = tn, if_exists = 'append', index = False)
 
-    # def stack()
 
     def read_FV(self, sin, rep, procset='proc1', method='phaseshift', wid = -1):
         """get data from table FV for a certain wave-field transformation method"""

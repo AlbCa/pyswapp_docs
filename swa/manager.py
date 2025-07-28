@@ -233,7 +233,7 @@ class BaseManager:
         if isinstance(procset,str):
             self._loadset = procset
         else:
-            self._loadset = 'raw'
+            self._loadset = 'proc1'
 
     def load_procset(self, procset = None, **kwargs):
         """load processed data from database"""
@@ -452,6 +452,7 @@ class BaseManager:
         stream = self.current_stream
 
         wids = self._sql.get_wids(sin, rep, self._loadset)
+
         if use_windows:
             if len(wids) > 0:
                 for wid in wids:
@@ -907,7 +908,7 @@ class BaseManager:
             raise NotImplementedError(f'Interactive figure switcher does not exist for plot type "{type}"')
 
         if use_windows:
-            window = DualDataSwitcher(self.data, self._sql, plot=type, DataSwitcher=DataSwitcher,
+            window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,select_plot = False, **kwargs)
@@ -921,7 +922,7 @@ class BaseManager:
             self.app.exec()
 
         else:
-            window = DataSwitcher(self.data, self._sql, plot=type,
+            window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,select_plot = False,**kwargs)
@@ -970,7 +971,7 @@ class BaseManager:
         DataSwitcher = DataSwitcherBase
 
         if use_windows:
-            window = DualDataSwitcher(self.data, self._sql, plot=type, DataSwitcher=DataSwitcher,
+            window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,**kwargs)
@@ -984,7 +985,7 @@ class BaseManager:
             self.app.exec()
 
         else:
-            window = DataSwitcher(self.data, self._sql, plot=type,
+            window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,**kwargs)
@@ -1137,6 +1138,9 @@ class MASW2DManager(BaseManager):
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default False, whether to apply the processing to windows
         """
+
+        if procset is None:
+            procset = self._procset
 
         # Apply process to current selection only
         if apply_to == 'cur':
@@ -1447,6 +1451,8 @@ class MASW2DManager(BaseManager):
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
+
+        self.set_loadset(procset)
 
     # %% curve combination
     def prepare_CC(self, procset = None, method = None,

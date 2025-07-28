@@ -1,6 +1,7 @@
 import copy
 from .utils.utils import *
 from .utils.interactive import *
+from .utils.sql import *
 from .curve import DispersionCurve
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
@@ -151,7 +152,7 @@ class DataSwitcherBase(QWidget):
 
         self.setWindowTitle(window_title)
         self.window_label = window_label
-        self._sql = sql
+        self._sql = SQL(database=sql)
 
         self.active_label = 'PLOT INACTIVE'
 
@@ -181,7 +182,7 @@ class DataSwitcherBase(QWidget):
 
         self.grouped_methods = {}
         for procset in procsets:
-            self.grouped_methods[procset] = list(sql.get_trafo_labels(procset))
+            self.grouped_methods[procset] = list(self._sql.get_trafo_labels(procset,use_windows))
         self.methods = self.grouped_methods[procset]
 
         if not self.methods:
