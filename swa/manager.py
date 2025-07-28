@@ -272,11 +272,14 @@ class BaseManager:
         """Return the file path corresponding to the indices sin and rep as string"""
         if self.fileList is not None:
             sn = self._sql.get_shotfile(sin, rep).shots.item()
+
             for i, fp in enumerate(self.fileList):
                 path, fn = os.path.split(fp)
                 sfn = re.findall(r'\d+', fn.replace(self.ext, ''))[0]
-                if str(sn) == str(sfn):
+
+                if int(sn) == int(sfn):
                     return os.path.join(path,fn)
+
         return None
 
     def _read_data(self):
@@ -312,7 +315,8 @@ class BaseManager:
                         if self.create:
                             self._write_data(self.data[sin][rep], sin, rep, 'proc1')
             else:
-                raise FileNotFoundError
+                #pass
+                self.logger.error(f'Shot file {fn} not found.')
 
         endtime = time.time()
         print(f' {np.round(endtime - starttime, 2)} s')
