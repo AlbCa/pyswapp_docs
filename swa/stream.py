@@ -3186,6 +3186,9 @@ class SeismicStream:
         ax.set_ylabel(labely)
         ax.set_ylim([np.min(daty), np.max(daty)])
 
+        ax.xaxis.tick_top()
+        ax.xaxis.set_label_position("top")
+
         for axis in ['top', 'bottom', 'left', 'right']:
             ax.spines[axis].set_linewidth(1)
 

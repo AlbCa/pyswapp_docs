@@ -1,5 +1,3 @@
-import matplotlib
-#matplotlib.use("Qt5Agg")
 from contextlib import suppress
 
 import warnings

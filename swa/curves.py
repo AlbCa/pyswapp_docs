@@ -8,6 +8,8 @@ from .curve import DispersionCurve
 
 import warnings
 
+# TODO improve the class, especially the interactive filtering etc
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class CombineCurves:

@@ -19,6 +19,7 @@ from .qtapps import *
 # 1.1.3 - error handling of all input files
 
 # TODO: test on field data
+# TODO: basic sanity checks
 # TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
 # --> change warnings to logging!
 # TODO: dynamic/static plotting [check]
@@ -70,7 +71,6 @@ class BaseManager:
         else:
             self._create_project(**kwargs)
 
-    # TODO: check if file has preferred filename style?
     def _create_project(self,**kwargs):
         """Create the project directory and database"""
 
@@ -155,7 +155,7 @@ class BaseManager:
 
         # set procset
         self.set_new_procset(procset='proc1')
-        self._sql.show_tables()
+        #self._sql.show_tables()
 
         print('')
 
@@ -205,8 +205,8 @@ class BaseManager:
         self.data = {}
 
         # procset label
-        self._procset = None # procset to store new process
-        self._loadset = 'raw' # procset to load process from
+        self._procset = 'proc1' # procset to store new process
+        self._loadset = 'proc1' # procset to load process from
 
         # current stream
         self.current_stream = None
@@ -1083,6 +1083,9 @@ class MASW2DManager(BaseManager):
         if procset is None:
             procset = self._procset
 
+        if procset != self._procset:
+            self.set_new_procset(procset)
+
         # Apply process to current selection only
         if apply_to == 'cur':
             if self.current_stream is None:
@@ -1113,6 +1116,8 @@ class MASW2DManager(BaseManager):
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
+        self.set_loadset(procset)
+
     def preprocess(self, type='trim', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """
         Apply preprocessing steps to current selection or all data sets
@@ -1141,6 +1146,9 @@ class MASW2DManager(BaseManager):
 
         if procset is None:
             procset = self._procset
+
+        if procset != self._procset:
+            self.set_new_procset(procset)
 
         # Apply process to current selection only
         if apply_to == 'cur':
@@ -1171,6 +1179,8 @@ class MASW2DManager(BaseManager):
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
+
+        self.set_loadset(procset)
 
     def transform(self, type='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """
@@ -1414,7 +1424,8 @@ class MASW2DManager(BaseManager):
 
         if procset is None:
             procset = self._procset
-        elif procset != self._procset:
+
+        if procset != self._procset:
             self.set_new_procset(procset)
 
         # Apply process to current selection only
@@ -1742,6 +1753,9 @@ class Tomo2DManager(BaseManager):
         if procset is None:
             procset = self._procset
 
+        if procset != self._procset:
+            self.set_new_procset(procset)
+
         starttime = time.time()
 
         for sin in self.data.keys():
@@ -1773,6 +1787,8 @@ class Tomo2DManager(BaseManager):
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
 
+        self.set_loadset(procset)
+
     def preprocess_streams(self, type = 'filter', procset = None, **kwargs):
         """
         Apply preprocessing steps to current selection or all data sets
@@ -1782,6 +1798,12 @@ class Tomo2DManager(BaseManager):
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
         """
+
+        if procset is None:
+            procset = self._procset
+
+        if procset != self._procset:
+            self.set_new_procset(procset)
 
         starttime = time.time()
 
@@ -1797,6 +1819,8 @@ class Tomo2DManager(BaseManager):
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
+
+        self.set_loadset(procset)
 
     def preprocess(self, type='trim', procset = None, **kwargs):
         """
@@ -1822,6 +1846,9 @@ class Tomo2DManager(BaseManager):
 
         if procset is None:
             procset = self._procset
+
+        if procset != self._procset:
+            self.set_new_procset(procset)
 
         # compute the phase differences
         starttime = time.time()

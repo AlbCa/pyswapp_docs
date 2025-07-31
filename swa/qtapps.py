@@ -1,4 +1,7 @@
 import copy
+
+import numpy as np
+
 from .utils.utils import *
 from .utils.interactive import *
 from .utils.sql import *
@@ -112,8 +115,9 @@ class DualDataSwitcher(QMainWindow):
 
         # Link left to right
         self.viewer1.index_changed.connect(self.viewer2.set_group)
-        self.viewer1.procset_changed.connect(self.viewer2.load_procset)
-        self.viewer1.plot_changed.connect(self.viewer2.load_plot)
+        self.viewer1.procset_changed.connect(self.viewer2.set_procset)
+        self.viewer1.plot_changed.connect(self.viewer2.set_plot)
+        #self.viewer1.index_changed.connect(self.viewer2.set_index)
 
     def clean(self):
         self.viewer1.clean()
@@ -129,9 +133,13 @@ class DataSwitcherBase(QWidget):
     procset_changed = pyqtSignal(str)
     plot_changed = pyqtSignal(str)
 
-    def __init__(self, data, sql, plot = 'TX', use_windows=False, interaction_class=None,
+    def __init__(self, data, sql, plot = 'TX',
+                 use_windows=False, interaction_class=None,
                  procset = None, procsets = None,
-                 btn_label = 'Click me', window_label = 'SHOTFILES', window_title = 'SWA Viewer',select_plot = True,
+                 btn_label = 'Click me',
+                 window_label = 'SHOTFILES',
+                 window_title = 'SWA Viewer',
+                 select_plot = True,
                  **kwargs):
         super().__init__()
 
@@ -159,7 +167,7 @@ class DataSwitcherBase(QWidget):
         # remove raw from processing ???
         if interaction_class:
             procsets = list(procsets)
-            procsets.remove('raw')
+            procsets = [p for p in procsets if p != 'raw']
             self.active_label = 'PLOT ACTIVE'
 
         if procsets is None:
@@ -243,12 +251,15 @@ class DataSwitcherBase(QWidget):
         vel, kw, freq, FV = self._get_FV(sin, rep, procset=procset, wid=wid, method=method)
         if FV is not None:
             data.update_FV(method, vel, kw, freq, FV)
+            return True
         else:
-            self.logger.warning(f'Wave-field transformation not yet performed. Running {method} transformation.')
-            data.transform(method = method)
-            self._write_FV(data, sin, rep, procset, wid=wid)
-            #self.update_display()
-        return True
+            _, amps, _, _ = self._get_data(sin, rep, procset=procset, wid=wid)
+            if not amps.empty:
+                self.logger.warning(f'Wave-field transformation not yet performed. Running {method} transformation.')
+                data.transform(method = method)
+                self._write_FV(data, sin, rep, procset, wid=wid)
+                return True
+            return False
 
     # data selection
     def create_labels(self):
@@ -276,11 +287,14 @@ class DataSwitcherBase(QWidget):
 
         return None
 
-    def create_figure(self, plot = None, **kwargs):
+    def create_figure(self, plot = None, procset = None, **kwargs):
         """plot portions of the stream data"""
 
         if not self.labels:
             return None
+
+        if procset is None:
+            procset = self.procset
 
         if not plot:
             plot = self.plot
@@ -288,14 +302,14 @@ class DataSwitcherBase(QWidget):
         label = self.labels[self.current_index]
 
         self.stream = self.select_data(label[0],label[1])
-        self.data_exists = self._set_data(self.stream, label[0],label[1], self.procset, label[2])
+        self.data_exists = self._set_data(self.stream, label[0],label[1], procset, label[2])
 
         if plot in ['dispersionImage', 'dispersionImageComposite', 'FV', 'FVComposite']:
-            FV_flag = self._set_FV(self.stream, label[0],label[1], self.procset, method=self.method, wid=label[2])
+            FV_flag = self._set_FV(self.stream, label[0],label[1], procset, method=self.method, wid=label[2])
             self.data_exists = self.data_exists & FV_flag
 
         if plot == 'DC':
-            curves = self._get_curve(label[0],label[1], self.procset, wid=label[2],
+            curves = self._get_curve(label[0],label[1], procset, wid=label[2],
                                          method=kwargs.pop('method','phaseshift'))
             if not curves.empty:
 
@@ -325,12 +339,14 @@ class DataSwitcherBase(QWidget):
     def _get_current_labels(self):
         return self.all_labels if not self.is_grouped else self.all_labels[self.group_index]
 
-    def add_combobox(self, label, sets, set):
-        # dropdown_label = QLabel(label)
-        # dropdown_label.setStyleSheet("font-size: 14px; color: gray;")
+    def add_combobox(self, sets, set, label=None, size = 90):
+
+        # if label is not None:
+        #     dropdown_label = QLabel(label)
+        #     dropdown_label.setStyleSheet("font-size: 14px; color: gray;")
         combo = QComboBox()
         combo.addItems(sets)
-        combo.setFixedSize(90, 40)
+        combo.setFixedSize(size, 40)
 
         if len(sets) > 0:
             try:
@@ -342,11 +358,23 @@ class DataSwitcherBase(QWidget):
         return combo
 
     def init_ui(self):
+        """interface design"""
+
         self.layout = QVBoxLayout(self)
+
+        self.info_layout = QHBoxLayout()
 
         label = QLabel(self.window_label)
         label.setStyleSheet("font-size: 14px; color: gray;")
-        self.layout.addWidget(label)
+        self.info_layout.addWidget(label)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        self.info_layout.addStretch()
+        self.info_layout.addWidget(self.label)
+        self.layout.addLayout(self.info_layout)
 
         # Navigation bar
         self.nav_layout = QHBoxLayout()
@@ -357,24 +385,31 @@ class DataSwitcherBase(QWidget):
         self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
         self.right_btn.setFixedSize(40, 40)
 
-        # SIN/REP/WIN index
-        self.label = QLabel()
-        self.label.setStyleSheet("font-size: 14px; color: gray;")
-
         self.nav_layout.addWidget(self.left_btn)
         self.nav_layout.addWidget(self.right_btn)
 
         # Dropdown menu to select procset
-        if not self.is_grouped and self.procset is not None:
-            self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
-            self.combo.currentTextChanged.connect(self.load_procset)
+        if not self.is_grouped:
+            self.combo =  self.add_combobox(self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.set_procset)
             self.nav_layout.addWidget(self.combo)
 
         # Dropdown menu to select plot
         if not self.is_grouped and self.select_plot:
-            self.combo_plots = self.add_combobox("PLOT:", self.plots, self.plot)
-            self.combo_plots.currentTextChanged.connect(self.load_plot)
+            self.combo_plots = self.add_combobox(self.plots, self.plot)
+            self.combo_plots.currentTextChanged.connect(self.set_plot)
             self.nav_layout.addWidget(self.combo_plots)
+
+        if not self.is_grouped:
+            sins = np.unique(np.asarray(self.labels)[:, 0])
+            sins = np.char.mod('%d', sins)
+
+            self.combo_select_sin = self.add_combobox(sins,
+                                                      str(self.current_index+1),
+                                                      'SIN:',
+                                                      50)
+            self.combo_select_sin.currentTextChanged.connect(self.set_index)
+            self.nav_layout.addWidget(self.combo_select_sin)
 
         # Interaction buttons
         if self.interaction_class:
@@ -383,7 +418,6 @@ class DataSwitcherBase(QWidget):
             self.nav_layout.addWidget(self.interact_btn)
 
         self.nav_layout.addStretch()
-        self.nav_layout.addWidget(self.label)
 
         self.layout.addLayout(self.nav_layout)
 
@@ -428,6 +462,7 @@ class DataSwitcherBase(QWidget):
         return None
 
     def create_placeholder(self, canvas):
+        """create canvas placeholder"""
 
         placeholder = QWidget()
         placeholder.setFixedSize(canvas.size())
@@ -439,6 +474,7 @@ class DataSwitcherBase(QWidget):
         return canvas
 
     def replace_widget(self, canvas, figure):
+        """remove widget"""
         self.layout.removeWidget(canvas)
         canvas.setParent(None)
         canvas.deleteLater()
@@ -446,6 +482,7 @@ class DataSwitcherBase(QWidget):
         return canvas
 
     def update_display(self):
+        """update the display"""
 
         # add points from previous session to next plot
         if self.interactor:
@@ -461,20 +498,25 @@ class DataSwitcherBase(QWidget):
         figure0 = self.create_figure(plot='geomShort')
         figure = self.create_figure()
 
-        #figure0.tight_layout()
-        if not figure0:
-            self.label.setText("No data")
-            self.canvas0 = self.create_placeholder(self.canvas0)
-            self.canvas = self.create_placeholder(self.canvas)
-            return
+        label = self.labels[self.current_index]
 
         # update label
         if not self.is_grouped:
-            label = self.labels[self.current_index]
-            self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
+            if not figure0:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]} | No data")
+            else:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
         else:
-            label = self.labels[self.current_index]
-            self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
+            if not figure0:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1} | No data")
+            else:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
+
+        # return blank canvas if no data exists
+        if not figure0:
+            self.canvas0 = self.create_placeholder(self.canvas0)
+            self.canvas = self.create_placeholder(self.canvas)
+            return
 
         # Replace canvas
         self.canvas0 = self.replace_widget(self.canvas0, figure0)
@@ -504,21 +546,32 @@ class DataSwitcherBase(QWidget):
         """Used when figures are grouped (e.g., in a multi-view setup)."""
         if not self.is_grouped or group_index >= len(self.all_labels):
             return
-
         self.group_index = group_index
         self.current_index = 0
         self.labels = self._get_current_labels()
         self.update_display()
         self.canvas.setFocus()
 
-    def load_procset(self, procset):
+    def set_procset(self, procset):
+        """set the procset and update figure"""
+        self.current_index = 0
         self.procset = procset
         self.procset_changed.emit(procset)
+        self.all_labels = self.create_labels()
+        self.labels = self._get_current_labels()
         self.update_display()
 
-    def load_plot(self, plot):
+    def set_plot(self, plot):
+        """set the plot type and update figure"""
         self.plot = plot
         self.plot_changed.emit(plot)
+        self.update_display()
+
+    def set_index(self, current_index):
+        """set the sin index and update the figure"""
+        _, indices = np.unique(np.asarray(self.labels)[:, 0], return_index=True)
+        self.current_index = indices[int(current_index)-1]
+        self.index_changed.emit(self.current_index)
         self.update_display()
 
     def clean(self):
@@ -547,9 +600,19 @@ class DataSwitcherPick(DataSwitcherBase):
     def init_ui(self):
         self.layout = QVBoxLayout(self)
 
+        self.info_layout = QHBoxLayout()
+
         label = QLabel(self.window_label)
         label.setStyleSheet("font-size: 14px; color: gray;")
-        self.layout.addWidget(label)
+        self.info_layout.addWidget(label)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        self.info_layout.addStretch()
+        self.info_layout.addWidget(self.label)
+        self.layout.addLayout(self.info_layout)
 
         # Navigation bar
         self.nav_layout = QHBoxLayout()
@@ -560,40 +623,38 @@ class DataSwitcherPick(DataSwitcherBase):
         self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
         self.right_btn.setFixedSize(40, 40)
 
-        if not self.is_grouped and self.procset is not None:
+        self.nav_layout.addWidget(self.left_btn)
+        self.nav_layout.addWidget(self.right_btn)
+
+        if not self.is_grouped:
             # Dropdown menu to select procset
-            self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
-            self.combo.currentTextChanged.connect(self.load_procset)
+            self.combo = self.add_combobox(self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.set_procset)
+            self.nav_layout.addWidget(self.combo)
 
         if self.procset is not None:
-            self.combo2 = self.add_combobox("METHOD:", self.methods, self.method)
-            self.combo2.currentTextChanged.connect(self.load_method)
+            self.combo2 = self.add_combobox(self.methods, self.method)
+            self.combo2.currentTextChanged.connect(self.set_method)
+            self.nav_layout.addWidget(self.combo2)
 
-        # SIN/REP/WIN index
-        self.label = QLabel()
-        self.label.setStyleSheet("font-size: 14px; color: gray;")
+        if not self.is_grouped:
+            _, indices = np.unique(np.asarray(self.labels)[:, 0], return_index=True)
+            indices = np.char.mod('%d', indices+1)
+
+            self.combo_select_sin = self.add_combobox(indices,
+                                                      str(self.current_index + 1),
+                                                      'SIN:',
+                                                      50)
+            self.combo_select_sin.currentTextChanged.connect(self.set_index)
+            self.nav_layout.addWidget(self.combo_select_sin)
 
         # Interaction buttons
         if self.interaction_class:
             self.interact_btn = QPushButton(self.btn_label)
             self.interact_btn.setFixedSize(100, 40)
-
-        self.nav_layout.addWidget(self.left_btn)
-        self.nav_layout.addWidget(self.right_btn)
-
-        if not self.is_grouped and self.procset is not None:
-            #self.nav_layout.addWidget(self.dropdown_label)
-            self.nav_layout.addWidget(self.combo)
-
-        if self.procset is not None:
-            #self.nav_layout.addWidget(self.dropdown_label2)
-            self.nav_layout.addWidget(self.combo2)
-
-        if self.interaction_class:
             self.nav_layout.addWidget(self.interact_btn)
 
         self.nav_layout.addStretch()
-        self.nav_layout.addWidget(self.label)
 
         self.layout.addLayout(self.nav_layout)
 
@@ -651,7 +712,7 @@ class DataSwitcherPick(DataSwitcherBase):
                                       wid=label[2],
                                       xmid = self.stream.midpoint)
 
-    def load_method(self, method):
+    def set_method(self, method):
 
         self.method = method
         self.update_display()
@@ -718,9 +779,19 @@ class DataSwitcherFilterFK(DataSwitcherBase):
     def init_ui(self):
         self.layout = QVBoxLayout(self)
 
+        self.info_layout = QHBoxLayout()
+
         label = QLabel(self.window_label)
         label.setStyleSheet("font-size: 14px; color: gray;")
-        self.layout.addWidget(label)
+        self.info_layout.addWidget(label)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        self.info_layout.addStretch()
+        self.info_layout.addWidget(self.label)
+        self.layout.addLayout(self.info_layout)
 
         # Navigation bar
         self.nav_layout = QHBoxLayout()
@@ -731,32 +802,31 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
         self.right_btn.setFixedSize(40, 40)
 
-        if not self.is_grouped and self.procset is not None:
-            # Dropdown menu to select procset
-            self.combo =  self.add_combobox("PROCSET:", self.procsets, self.procset)
-            self.combo.currentTextChanged.connect(self.load_procset)
-
-        # SIN/REP/WIN index
-        self.label = QLabel()
-        self.label.setStyleSheet("font-size: 14px; color: gray;")
-
-        # Interaction buttons
-        if self.interaction_class:
-            self.interact_btn = QPushButton(self.btn_label)
-            self.interact_btn.setFixedSize(100, 40)
-
         self.nav_layout.addWidget(self.left_btn)
         self.nav_layout.addWidget(self.right_btn)
 
-        if not self.is_grouped and self.procset is not None:
-            #self.nav_layout.addWidget(self.dropdown_label)
+        if not self.is_grouped:
+            self.combo = self.add_combobox(self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.set_procset)
             self.nav_layout.addWidget(self.combo)
 
+        if not self.is_grouped:
+            _,indices = np.unique(np.asarray(self.labels)[:, 0],return_index=True)
+            indices = np.char.mod('%d', indices+1)
+
+            self.combo_select_sin = self.add_combobox(indices,
+                                                      str(self.current_index+1),
+                                                      'SIN:',
+                                                      50)
+            self.combo_select_sin.currentTextChanged.connect(self.set_index)
+            self.nav_layout.addWidget(self.combo_select_sin)
+
         if self.interaction_class:
+            self.interact_btn = QPushButton(self.btn_label)
+            self.interact_btn.setFixedSize(100, 40)
             self.nav_layout.addWidget(self.interact_btn)
 
         self.nav_layout.addStretch()
-        self.nav_layout.addWidget(self.label)
 
         self.layout.addLayout(self.nav_layout)
 
