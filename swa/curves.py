@@ -15,9 +15,8 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 class CombineCurves:
     """combine dispersion curves and perform simple statistics"""
 
-    def __init__(self, path2cmb = ''):
+    def __init__(self):
 
-        self.path2cmb = path2cmb
         self.settings = None
         self.data = {}
         self.dc_mean = None
@@ -75,7 +74,7 @@ class CombineCurves:
 
     @staticmethod
     def _plot_lambda_intervals(lam_min = 0.1, lam_max = 180,a_range = range(2,8)):
-        """plot wavelength intervals"""
+        """plot wavelength intervals (Olafsdottir, 2018)"""
 
         qmin = int(np.round((np.log(lam_min) / np.log(2) + 1 / 6) * 3 - 1))
 
@@ -329,15 +328,9 @@ class CombineCurves:
 
         data = self.data
         for id,key in enumerate(data.keys()):
-            self.combination(key,id,**kwargs)
+            self.combination(key,**kwargs)
 
-        # save the xmid
-        xmids = [*data]
-        path2geom = os.path.join(self.path2cmb, 'geom')
-        safe_makedirs(path2geom)
-        np.savetxt(os.path.join(path2geom,'xmid.txt'), xmids)
-
-    def combination(self, key, id, mode = 0, axes = None, show=True, outfile=None, save = True, **kwargs):
+    def combination(self, key, mode = 0, axes = None, show=True, outfile=None, **kwargs):
         """run combination of dispersion curves"""
 
         data = self.data
@@ -365,10 +358,6 @@ class CombineCurves:
         dc_mean = DispersionCurve()
         dc_mean.init_data(freq=f_mean,vel=vel_mean,err=vel_std)
         self.data[key]['cmb'] = dc_mean
-
-        if save:
-            #dc_mean.save(self.path2cmb, f'xmid{key}', 'csv')
-            dc_mean.save(self.path2cmb, f'dc{id}', 'csv')
 
         # plot
         if show:

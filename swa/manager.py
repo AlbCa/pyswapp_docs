@@ -809,10 +809,7 @@ class BaseManager:
                 fig = ax.figure
 
             for xmid in xmids:
-                params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
-                          'xmid': xmid}
-                sub = self._sql.read_curve(params)
-
+                sub = curves[curves['xmid'] == xmid]
                 dc = DispersionCurve()
                 dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
 
@@ -1491,10 +1488,7 @@ class MASW2DManager(BaseManager):
             params['method'] = "'%s'" % method
             #kwargs.pop('method')
 
-        path2cmb = os.path.join(self.prjdir, f'proc/{procset}/cmb')
-        safe_makedirs(path2cmb)
-
-        self.CC = CombineCurves(path2cmb=path2cmb)  # location where combined dcs shall be stored
+        self.CC = CombineCurves()  # location where combined dcs shall be stored
 
         for sin in self.data.keys():
             for rep in self.data[sin].keys():
@@ -1557,7 +1551,7 @@ class MASW2DManager(BaseManager):
             data = {
                 'xmid': key,
                 'method': method,
-                'dc_mode': 0,
+                'dc_mode': dc_mode,
                  'f': dc.frequency,
                  'v': dc.velocity,
                  'err': dc.error}
@@ -1603,7 +1597,7 @@ class MASW2DManager(BaseManager):
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
 
-    def plot_CC(self, procset=None, method = None, dc_mode=0, **kwargs):
+    def plot_CC(self, procset=None, method = None, dc_mode = 0, pseudosection = True, **kwargs):
         """
         Plot the combined dispersion curves
 
@@ -1615,23 +1609,72 @@ class MASW2DManager(BaseManager):
         kwargs : arguments for the processing
 
         """
-
         if procset is None:
             procset = self._procset
 
         params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
                   'method': "'%s'" % method, 'dc_mode': dc_mode}
 
+        _, recs_all = self._sql.get_geometry(sin='*')
         curves = self._sql.read_curve(params)
-        xmids = curves['xmid'].unique()
 
-        for i, xmid in enumerate(xmids):
-            params = {'sin': -1, 'rep': -1, 'wid': -1, 'procset': "'%s'" % procset,
-                      'method': "'%s'" % method, 'dc_mode': dc_mode, 'xmid': xmid}
-            curve_data = self._sql.read_curve(params)
-            dc = DispersionCurve()
-            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            #dc.plot(**kwargs)
+        if not curves.empty:
+
+            xmids = curves['xmid'].unique()
+
+            # plot dispersion curves individually
+            if not pseudosection:
+                for i, xmid in enumerate(xmids):
+                    curve_data = curves[curves['xmid'] == xmid]
+                    dc = DispersionCurve()
+                    dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+                    dc.plot(**kwargs)
+
+            # plot pseudosection
+            else:
+                cmap = kwargs.pop('cmap', 'viridis')
+                show = kwargs.pop('show', True)
+                axes = kwargs.pop('axes', None)
+
+                vmin = kwargs.pop('vmin', 200)
+                vmax = kwargs.pop('vmax', 500)
+
+                fmin = kwargs.pop('fmin', curves['frequency'].min())
+                fmax = kwargs.pop('fmax', curves['frequency'].max())
+
+                title = kwargs.pop('title', '')
+                outfile = kwargs.pop('outfile', None)
+
+                if axes is None:
+                    fig, ax = plt.subplots()
+                else:
+                    ax = axes
+                    fig = ax.figure
+
+                for xmid in xmids:
+                    curve_data = curves[curves['xmid'] == xmid]
+                    dc = DispersionCurve()
+                    dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+
+                    dc.plotColumn(axes=ax,
+                                  xmid=xmid,
+                                  vmin=vmin, vmax=vmax,
+                                  cmap=cmap, y_value='f', **kwargs)
+
+                plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
+                ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
+                ax.set_ylim([fmin, fmax])
+
+                ax.set_title(title)
+                if outfile:
+                    fig.savefig(outfile)
+
+                if show:
+                    plt.tight_layout()
+                    plt.show()
+
+                return ax
+
 
     def save_CC(self, procset=None, method = None, dc_mode=0, format='csv', **kwargs):
         """
@@ -1656,7 +1699,7 @@ class MASW2DManager(BaseManager):
         xmids = np.sort(curves['xmid'].unique())
 
         # save the receiver spread midpoints
-        path2dc = os.path.join(self.prjdir, f'proc/{procset}/{method}')
+        path2dc = os.path.join(self.prjdir, f'03_proc/{procset}_{method}_CC/Mode{int(dc_mode)}')
         path2geom = os.path.join(path2dc, '1_geom')
 
         starttime = time.time()
