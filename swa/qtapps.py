@@ -14,18 +14,11 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# TODO always display raw on right-side
+# TODO always display raw on right-side?
 # TODO add menu with all options for filtering (e.g., taper strength etc)
 # TODO delete data from db option?
-
 # TODO adjust visualizations?
-# TODO fail safe for selecting transformation method [check]
-# TODO dual view to process windows and whole set (plot geometry on top?) [check]
-# TODO create link between selected procset and windowing plots [check]
-# TODO filtering in seismogram [done]
-# TODO deactivate interaction when viewing raw
 # TODO save picks??
-# TODO spyder close event [done]
 # TODO pick dc in FK plot
 
 class FigureSwitcher(QMainWindow):

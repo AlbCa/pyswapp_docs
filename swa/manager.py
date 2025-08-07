@@ -22,19 +22,9 @@ from .qtapps import *
 # TODO: basic sanity checks
 # TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
 # --> change warnings to logging!
-# TODO: dynamic/static plotting [check]
 # TODO: documentation!!!
-# TODO: keep copy of raw dispersion curves before filtering [check]
-# TODO: simplify the use of the procsets [check] ?
-# TODO: simplify the use of different methods [check]
-# TODO: read/save curves to provide individual procsets! [check] -> parameter new_procset can be set
-# TODO: read geometry with general file name! [check]
 # TODO: change settings midprocessing
-# TODO: better way to work with windowing data?? [check]
-# TODO: plotting issues when plotting windowing data as curve
-# TODO: flip polarity [check]
 # TODO: check what is happening with roll-along data
-# TODO: improve set up of project [check]
 
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
@@ -922,11 +912,16 @@ class BaseManager:
             self.logger.error(f'Interactive figure switcher does not exist for plot type "{type}"')
 
         if use_windows:
+
+            print('Loading the GUI ..... ', end="")
+            starttime = time.time()
             window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,select_plot = False, **kwargs)
             window.resize(800, 600)
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
             window.show()
 
             def handle_about_to_quit():
@@ -935,11 +930,15 @@ class BaseManager:
             self.app.aboutToQuit.connect(handle_about_to_quit)
             self.app.exec()
         else:
+            print('Loading the GUI ..... ', end="")
+            starttime = time.time()
             window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,select_plot = False,**kwargs)
             window.resize(800, 600)
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
             window.show()
 
             def handle_about_to_quit():
@@ -984,11 +983,15 @@ class BaseManager:
         DataSwitcher = DataSwitcherBase
 
         if use_windows:
+            print('Loading the GUI ..... ', end="")
+            starttime = time.time()
             window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,**kwargs)
             window.resize(800, 600)
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
             window.show()
 
             def handle_about_to_quit():
@@ -998,11 +1001,15 @@ class BaseManager:
             self.app.exec()
 
         else:
+            print('Loading the GUI ..... ', end="")
+            starttime = time.time()
             window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,**kwargs)
             window.resize(800, 600)
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
             window.show()
 
             def handle_about_to_quit():
