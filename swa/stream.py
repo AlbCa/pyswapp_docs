@@ -431,12 +431,10 @@ class SeismicStream:
 
     def update_pst(self,amps,sht,recs,par):
         """update stream data"""
-
         self._pst = self._st.copy()
         self._create_st(amps, par)
         self.apply_geometry(sht, recs)
         self._update_params_from_amps(amps)
-        self.tapered = False # TODO does it make sense here??? or write into db?? only FK filter affects this
 
     def reset_pst(self):
         self._pst = None
@@ -1040,6 +1038,8 @@ class SeismicStream:
         elif by == 'reverse_polarity':
             trace_indices = kwargs.setdefault('ids', [])
             self._reverse_polarity(trace_indices)
+        elif by == 'taper':
+            self._apply_taper()
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
@@ -1117,77 +1117,6 @@ class SeismicStream:
         # update
         self._pst = st_proc
 
-    # #################
-    # DEPRECATED !!!
-    # def _mute(self, tapering='mild', **kwargs):
-    #     """
-    #     interactive linear muting
-    #
-    #     Parameters
-    #     ----------
-    #     tapering : str, taper strength
-    #     """
-    #
-    #     if self._pst is None:
-    #         st_proc = self._st.copy()
-    #     else:
-    #         st_proc = self._pst.copy()
-    #     self._st_backup_mute = st_proc.copy()
-    #
-    #     # repetition for left and right side muting
-    #     terminate = False
-    #     count = 0
-    #
-    #     while terminate is False:
-    #
-    #         fig, ax = plt.subplots(figsize=(8, 5))
-    #         self._plotSeismogram(axes=ax, amp_scale=1, show = False, **kwargs)
-    #
-    #         text = '\n'.join((
-    #             r'$\bf{Keyboard \quad commands:}$',
-    #             r'Press $\bf{t}$ for top or $\bf{b}$ for bottom mute.',
-    #             r'Press $\bf{v}$ to estimate the velocity.',
-    #             r'Press $\bf{enter}$ to refresh.',
-    #             r'Press $\bf{crtl+z}$ to reset last step. Press $\bf{r}$ to reset.',
-    #             r'Press $\bf{e}$ to stop the process.'))
-    #         at = AnchoredText(text,
-    #                            loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.15),
-    #                    bbox_transform=ax.transAxes
-    #                    )
-    #         ax.add_artist(at)
-    #
-    #         plot = SeismoInteractive(ax,receiver=self.receiver)
-    #         ax.set_title(f'Top mute active', fontweight='bold')
-    #         plt.tight_layout()
-    #         plt.show()
-    #
-    #         # extract points from points_list
-    #         points = []
-    #         if len(plot.points) > 0:
-    #             x, y = zip(*sorted(plot.points.items()))
-    #             for i in range(len(x)):
-    #                 points.append((x[i], y[i]))
-    #
-    #         key = plot.key
-    #         reset = plot.reset
-    #         reset_last = plot.reset_last
-    #         terminate = plot.terminate
-    #
-    #         if reset:
-    #             self._reset_mute()
-    #             count = 0
-    #
-    #         if reset_last:
-    #             self._reset_mute_last()
-    #             count -= 1
-    #
-    #         elif terminate is False and (not reset) and (not reset_last):
-    #             if len(points) > 0:
-    #                 self._linear_mute(points,key, tapering=tapering)
-    #                 count += 1
-    #             else:
-    #                 terminate= True
-    # #################
 
     def _linear_mute(self, points,key='t', **kwargs):
         """
@@ -1410,7 +1339,7 @@ class SeismicStream:
         # top half
         FK[:pos_freq] = FK_unwrap
         # bottom half
-        FK[pos_freq:] = np.conj(np.rot90(FK_unwrap, 2))
+        FK[pos_freq:] = np.conj(np.rot90(FK_unwrap[:], 2))
 
         # back transformation
         FK = np.fft.ifftshift(np.transpose(np.conj(FK)))
@@ -1425,13 +1354,13 @@ class SeismicStream:
 
         return amps
 
-    def _fk_transform(self):
+    def _fk_transform(self, taper_amps = True):
         """Transformation to F-K domain"""
         receiver = self.receiver
         source = self.source
 
         # amplitude data & processing
-        if not self.tapered:
+        if taper_amps:
             self._apply_taper()
 
         if self._pst is None:
@@ -1471,25 +1400,20 @@ class SeismicStream:
         theta = np.angle(FK_unwrap)
         FK_abs = abs(FK_unwrap)
 
+        self._add_fk_data_to_dict(FK_abs, theta, kw, freq, iX, iT)
+
         return FK_abs, theta, kw, freq,iX,iT
 
-    def _add_fk_data_to_dict(self,FK_data, theta = None, kw = None, freq = None, iX = None, iT = None):
-        self.FK_data['FK_abs'] = FK_data
-        if theta is not None:
-            self.FK_data['theta'] = theta
-        if kw is not None:
-            self.FK_data['kw'] = kw
-        if freq is not None:
-            self.FK_data['freq'] = freq
-        if iX is not None:
-            self.FK_data['iX'] = iX
-        if iT is not None:
-            self.FK_data['iT'] = iT
+    def _add_fk_data_to_dict(self,FK_data, theta, kw , freq, iX, iT):
+        self.FK_data.update({'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT})
 
     def fk_filter_from_pick_ui(self, points, key = 't', **kwargs):
         """apply fk filter from picking boundaries"""
 
-        FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
+        if not self.FK_data:
+            FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
+        else:
+            FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
 
         npoints = FK_abs.shape[1]
 
@@ -1699,7 +1623,10 @@ class SeismicStream:
         """apply the fk filter based on a file containing the bounds"""
 
         # transformation
-        FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
+        if not self.FK_data:
+            FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
+        else:
+            FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
 
         npoints = FK_abs.shape[1]
 
@@ -1796,7 +1723,7 @@ class SeismicStream:
             self.logger.warning(warn_msg)
 
 
-    def transform(self, method = 'phaseshift'):
+    def transform(self, method = 'phaseshift', **kwargs):
         """Apply the wave field transformation"""
 
         keys = ['fdbf', 'phaseshift']
@@ -1830,7 +1757,7 @@ class SeismicStream:
             # plane steering vector
             return np.exp(1j * kx * sign)
 
-    def _phaseshift(self):
+    def _phaseshift(self, taper_amps = True):
         """Phase-shift transformation method after Park et al.(1998)."""
 
         self.dispersive_energy = None
@@ -1842,7 +1769,7 @@ class SeismicStream:
         source = self.source
 
         # amplitude data & processing
-        if not self.tapered:
+        if taper_amps:
             self._apply_taper()
 
         if self._pst is None:
@@ -1928,7 +1855,7 @@ class SeismicStream:
 
         return R
 
-    def _fdbf(self, steering = 'cylindrical'):
+    def _fdbf(self, steering = 'cylindrical', taper_amps = True):
         """frequency-domain beamforming (Zywicki, 1999)"""
 
         self.dispersive_energy = None
@@ -1943,7 +1870,7 @@ class SeismicStream:
         offsets = self._aoffsets(receiver, source)
 
         # amplitude data & processing
-        if not self.tapered:
+        if taper_amps:
             self._apply_taper()
 
         if self._pst is None:
@@ -2011,7 +1938,7 @@ class SeismicStream:
         self.wavenumber = ks
 
     def _MOPA(self, weighted = False, std = None, rel_err = 5/100, abs_err = None,
-              stopAtChi2=2, **kwargs):
+              stopAtChi2=2, taper_amps = True, **kwargs):
         """Multi-offset phase analysis (MOPA; Strobbia and Foti, 2014)"""
 
         dt = self.dt
@@ -2022,7 +1949,7 @@ class SeismicStream:
         offsets = self._aoffsets(receiver,source)
         min_nrec = kwargs.pop('min_nrec',12)
 
-        if not self.tapered:
+        if taper_amps:
             self._apply_taper()
 
         if self._pst is None:
@@ -2129,13 +2056,13 @@ class SeismicStream:
             warn_msg = 'No dispersion curve extracted.'
             self.logger.warning(warn_msg)
 
-    def compute_phasediffs(self):
+    def compute_phasediffs(self, taper_amps):
         """compute phase differences between adjacent receivers for one shot file"""
 
         receiver = self.receiver
         source = self.source
 
-        if not self.tapered:
+        if taper_amps:
             self._apply_taper()
 
         if self._pst is None:
@@ -2607,9 +2534,12 @@ class SeismicStream:
         step = kwargs.pop('tick_scale', len(receiver)//3)
         alpha = kwargs.pop('alpha',0.5)
         show_map = kwargs.pop('show_map', False)
+        detrend = kwargs.pop('detrend', False)
 
         amps = self._amps(st=st)
-        amps = self._detrend_signal(amps)
+
+        if detrend:
+           amps = self._detrend_signal(amps)
         if self.norm_amps:
            amps = self._normalize_amps(amps)
 
@@ -2960,7 +2890,7 @@ class SeismicStream:
 
         # transformation
         if FK_data is None:
-            FK_data, theta, kw, freq, iX, iT = self._fk_transform()
+            FK_data, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
             npoints = FK_data.shape[1]
             kwpos = np.linspace(0, 2 * np.max(kw), npoints)
 
@@ -3044,11 +2974,13 @@ class SeismicStream:
         linewidth = kwargs.pop('linewidth', 0.5)
         scale = kwargs.pop('scale', 1)
         alpha = kwargs.pop('alpha',0.5)
+        detrend = kwargs.pop('detrend', False)
 
         amps = self._amps(st=st)
-        amps = self._detrend_signal(amps)
+        if detrend:
+            amps = self._detrend_signal(amps)
         if self.norm_amps:
-           amps = self._normalize_amps(amps)
+            amps = self._normalize_amps(amps)
 
         # add empty traces in plot if channels were removed for the visualisation
         receiver = self.receiver

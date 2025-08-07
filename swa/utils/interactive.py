@@ -21,11 +21,12 @@ class DraggablePoints:
         self._points = {}  # Dict: x -> y
         self._line = None
 
-        kwargs.setdefault('color','r')
-        kwargs.setdefault('linestyle', '--')
-        kwargs.setdefault('linewidth', 1)
-        kwargs.setdefault('markersize', 7)
-        kwargs.setdefault('marker', 'x')
+        color = kwargs.pop('color', 'r')
+        ls = kwargs.pop('linestyle', '--')
+        lw = kwargs.pop('linewidth', 1)
+        ms = kwargs.pop('markersize', 7)
+        marker = kwargs.pop('marker', 'x')
+        self._plot_kwargs = {'color':color,'linestyle':ls,'linewidth':lw, 'markersize':ms,'marker':marker}
 
         self._kwargs = kwargs
 
@@ -56,8 +57,9 @@ class DraggablePoints:
             self._line = None
 
         if self._points:
+
             x, y = zip(*sorted(self._points.items()))
-            self._line, = self.ax.plot(x, y, **self._kwargs)
+            self._line, = self.ax.plot(x, y, **self._plot_kwargs)
 
         self.canvas.draw_idle()
 
@@ -268,10 +270,14 @@ class SeismoInteractive(DraggablePoints):
             self.ax.set_title('Velocity estimation', fontweight='bold')
             self.canvas.draw_idle()
 
-    def filter(self,**kwargs):
+    def filter(self):
+
+        kwargs = self._kwargs
+        taper_type = kwargs.pop('taper_type', 'tukey')
+        taper = kwargs.pop('tapering', 'mild')
 
         if self._points:
-            self.data.linear_mute(self._points, key=self._key, **kwargs)
+            self.data.linear_mute(self._points, key=self._key, taper = taper, taper_type = taper_type)
 
             # reset plot
             self._points = {}
@@ -317,9 +323,13 @@ class FKFilterInteractive(DraggablePoints):
         # self._reset = False
         # self._reset_last = False
 
-    def filter(self,**kwargs):
+    def filter(self):
+
+        kwargs = self._kwargs
+        taper_length = kwargs.pop('taper_length', 5)
+
         if self._points:
-            self.data.fk_filter_from_pick_ui(self._points, key = self._key, **kwargs)
+            self.data.fk_filter_from_pick_ui(self._points, key = self._key, taper_length = taper_length)
 
             # reset plot
             self._points = {}

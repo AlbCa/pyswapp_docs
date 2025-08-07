@@ -849,6 +849,9 @@ class BaseManager:
 
         """
 
+        if procset is None:
+            procset = self._procset
+
         if type == 'pseudosection':
             ax = self.plot_pseudosection(procset, **kwargs)
             return ax
@@ -880,6 +883,17 @@ class BaseManager:
         window.show()
         sys.exit(self.app.exec())
 
+    def _get_windows(self,procset):
+
+        labels = []
+
+        for sin in self.data.keys():
+            for rep in self.data[sin].keys():
+                wids = self._sql.get_wids(sin, rep, procset)
+                labels.append([[sin, rep, x] for x in wids])
+
+        return labels
+
     # TODO save point list or something?
     def gui_interact(self, type='', procset = None, use_windows = False,**kwargs):
         """
@@ -893,6 +907,9 @@ class BaseManager:
 
         """
 
+        if procset is None:
+            procset = self._procset
+
         window_title = 'SWA - Interactive Figure Viewer'
 
         if type in ['', 'seismogram', 'TX']:
@@ -902,7 +919,7 @@ class BaseManager:
         elif type == 'FK':
             DataSwitcher = DataSwitcherFilterFK
         else:
-            raise NotImplementedError(f'Interactive figure switcher does not exist for plot type "{type}"')
+            self.logger.error(f'Interactive figure switcher does not exist for plot type "{type}"')
 
         if use_windows:
             window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
@@ -917,7 +934,6 @@ class BaseManager:
 
             self.app.aboutToQuit.connect(handle_about_to_quit)
             self.app.exec()
-
         else:
             window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
@@ -997,7 +1013,6 @@ class BaseManager:
             self.app.exec()
 
         plt.close('all')
-
 
 class MASW2DManager(BaseManager):
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db',**kwargs):
@@ -1877,7 +1892,7 @@ class Tomo2DManager(BaseManager):
 
         self.preprocess_streams(type, procset, **kwargs)
 
-    def compute_phasediff(self, procset = None):
+    def compute_phasediff(self, procset = None, **kwargs):
         """
         Compute phase differences and store in database
 
@@ -1892,6 +1907,8 @@ class Tomo2DManager(BaseManager):
 
         if procset != self._procset:
             self.set_new_procset(procset)
+
+        taper_amps = kwargs.pop('taper_amps', True)
 
         # compute the phase differences
         starttime = time.time()
@@ -1916,7 +1933,7 @@ class Tomo2DManager(BaseManager):
                     tmp = copy.deepcopy(current_stream)
                     self._set_data(tmp, sin, rep, procset, wid)
 
-                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs()
+                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs(taper_amps = taper_amps)
                     cur_rec = tmp.receiver
 
                     cur_sht_geom, cur_rec_geom = self._sql.get_geometry(sin, rep)

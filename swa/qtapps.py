@@ -1,6 +1,7 @@
 import copy
 
 import numpy as np
+import collections
 
 from .utils.utils import *
 from .utils.interactive import *
@@ -13,6 +14,11 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# TODO always display raw on right-side
+# TODO add menu with all options for filtering (e.g., taper strength etc)
+# TODO delete data from db option?
+
+# TODO adjust visualizations?
 # TODO fail safe for selecting transformation method [check]
 # TODO dual view to process windows and whole set (plot geometry on top?) [check]
 # TODO create link between selected procset and windowing plots [check]
@@ -100,6 +106,7 @@ class DualDataSwitcher(QMainWindow):
             DataSwitcher = DataSwitcherBase
 
         # Viewer 1: controls the index
+        # TODO: show raw?
         self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets,
                                         select_plot = select_plot, **kwargs)
         self.viewer1.setFixedSize(400, 600)
@@ -145,6 +152,7 @@ class DataSwitcherBase(QWidget):
 
         self.logger = create_logging(name='GUI')
 
+        #self.data = data
         self.data = data
 
         if not plot:
@@ -179,7 +187,8 @@ class DataSwitcherBase(QWidget):
         self.procset = procset
 
         self.is_grouped = use_windows
-        self.all_labels = self.create_labels()
+        self.all_labels = self._get_all_labels()
+
         self.interaction_class = interaction_class
 
         self.group_index = 0
@@ -262,14 +271,15 @@ class DataSwitcherBase(QWidget):
             return False
 
     # data selection
-    def create_labels(self):
+    def _get_all_labels(self):
+        """get all data indices for data selection"""
 
         labels = []
 
         if self.is_grouped:
             for sin in self.data.keys():
                 for rep in self.data[sin].keys():
-                    wids = self._sql.get_wids(sin, rep, self.procset)
+                    wids = sorted(self._sql.get_wids(sin, rep, self.procset))
                     labels.append([[sin,rep,x] for x in wids])
         else:
             for sin in self.data.keys():
@@ -277,6 +287,10 @@ class DataSwitcherBase(QWidget):
                     labels.append([sin,rep,-1])
 
         return labels
+
+    def _get_current_labels(self):
+        """return data indices of current data"""
+        return self.all_labels if not self.is_grouped else self.all_labels[self.group_index]
 
     def select_data(self, sin=1, rep=1):
         """Select one stream object based on source location and shot repetition indices"""
@@ -335,9 +349,6 @@ class DataSwitcherBase(QWidget):
             return self.stream.plot(plot, show=False, gui = True, **self.kwargs, **kwargs)
 
         return None
-
-    def _get_current_labels(self):
-        return self.all_labels if not self.is_grouped else self.all_labels[self.group_index]
 
     def add_combobox(self, sets, set, label=None, size = 90):
 
@@ -498,19 +509,20 @@ class DataSwitcherBase(QWidget):
         figure0 = self.create_figure(plot='geomShort')
         figure = self.create_figure()
 
-        label = self.labels[self.current_index]
-
         # update label
         if not self.is_grouped:
+            label = self.labels[self.current_index]
             if not figure0:
                 self.label.setText(f"SIN {label[0]} | REP {label[1]} | No data")
             else:
                 self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
         else:
             if not figure0:
-                self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1} | No data")
+                self.label.setText(f"No data")
             else:
-                self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
+                label = self.labels[self.current_index]
+                self.label.setText(
+                    f"SIN {label[0]} | REP {label[1]} | WIN {label[2] + 1}")  # + " | " + self.active_label)
 
         # return blank canvas if no data exists
         if not figure0:
@@ -557,7 +569,7 @@ class DataSwitcherBase(QWidget):
         self.current_index = 0
         self.procset = procset
         self.procset_changed.emit(procset)
-        self.all_labels = self.create_labels()
+        self.all_labels = self._get_all_labels()
         self.labels = self._get_current_labels()
         self.update_display()
 
@@ -733,7 +745,6 @@ class DataSwitcherFilterSeis(DataSwitcherBase):
         super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
                  procset = procset, procsets = procsets, btn_label='Filter | Reset', select_plot = select_plot, **kwargs)
 
-    # TODO there is probably a much better way than this ....
     def interact(self):
         """filter data based on FK plot"""
         if self.interactor:
@@ -874,21 +885,26 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         figure1 = self.create_figure(plot='seismogram',**self.seis_kwargs)
         figure = self.create_figure()
 
+        # update label
+        if not self.is_grouped:
+            label = self.labels[self.current_index]
+            if not figure0:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]} | No data")
+            else:
+                self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
+        else:
+            if not figure0:
+                self.label.setText(f"No data")
+            else:
+                label = self.labels[self.current_index]
+                self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
+
         #figure0.tight_layout()
         if not figure0:
-            self.label.setText("No data")
             self.canvas0 = self.create_placeholder(self.canvas0)
             self.canvas1 = self.create_placeholder(self.canvas1)
             self.canvas = self.create_placeholder(self.canvas)
             return
-
-        # update label
-        if not self.is_grouped:
-            label = self.labels[self.current_index]
-            self.label.setText(f"SIN {label[0]} | REP {label[1]}")# + " | " + self.active_label)
-        else:
-            label = self.labels[self.current_index]
-            self.label.setText(f"SIN {label[0]} | REP {label[1]} | WIN {label[2]+1}")# + " | " + self.active_label)
 
         # Replace canvas
         self.canvas0 = self.replace_widget(self.canvas0, figure0)
@@ -919,7 +935,6 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.points[self.current_index] = self.interactor.points
             self.picks[self.current_index] = self.interactor.picks
 
-    # TODO there is probably a much better way than this ....
     def interact(self):
         """filter data based on FK plot"""
         if self.interactor:
@@ -927,7 +942,6 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
             points = self.points[self.current_index]
             label = self.labels[self.current_index]
-
             self._sql.dublicate_data(self.stream, label[0], label[1], label[2])
 
             # filter data
@@ -939,6 +953,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
                 stream = copy.deepcopy(self.stream) #self.select_data(label[0], label[1])
                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
 
+            # overwrite in db
             self._write_data(stream, label[0], label[1], self.procset, label[2])
 
             self.update_display()
