@@ -397,7 +397,7 @@ class DCPickingInteractive(DraggablePoints):
 
         if picks is not None:
             self._picks = picks
-            self._update_plot(show_legend=False,markersize=2,alpha=0.75)
+            self._update_plot(**kwargs)
 
         elif points:
             for x, y in points.items():
@@ -443,7 +443,7 @@ class DCPickingInteractive(DraggablePoints):
         """update plot after event"""
 
         show_legend = kwargs.pop('show_legend',True)
-        marker_size = kwargs.pop('markersize',5)
+        marker_size = kwargs.pop('markersize',3)
         alpha = kwargs.pop('alpha',1)
 
         # plot picked dispersion curve
@@ -460,7 +460,10 @@ class DCPickingInteractive(DraggablePoints):
                 if self._pick_lines:
                     self.ax.legend(loc='upper right')
                 else:
-                    self.ax.get_legend().remove()
+                    try:
+                        self.ax.get_legend().remove()
+                    except AttributeError:
+                        pass
 
             # Clear existing lines
             if self._line:

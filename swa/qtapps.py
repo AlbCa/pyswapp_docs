@@ -541,7 +541,6 @@ class DataSwitcherBase(QWidget):
             ax = figure.axes[0]
             points = self.points.get(self.current_index, {})
             picks = self.get_picks()#self.picks.get(self.current_index, {})
-
             self.interactor = self.interaction_class(ax, points=points, data = self.stream, picks = picks, **self.kwargs)
 
             #if self.interactor.picks:
@@ -694,10 +693,9 @@ class DataSwitcherPick(DataSwitcherBase):
             self.canvas.setFocus()
             self.interactor.interact()
             self.picks[self.current_index] = self.interactor.picks
+            self.write_data_to_sql()
             self.update_display()
             self.canvas.setFocus()
-
-            self.write_data_to_sql()
 
     def get_picks(self):
 
@@ -706,10 +704,10 @@ class DataSwitcherPick(DataSwitcherBase):
                   'sin': label[0], 'rep': label[1], 'wid': label[2]}
         curves = self._sql.read_curve(params)
         if not curves.empty:
-            picks = {0: {'f':curves['frequency'], 'v': curves['velocity']}}
+            picks = {0: {'f':curves['frequency'].values, 'v': curves['velocity'].values}}
             return picks
 
-        return None
+        return {}
 
     def write_data_to_sql(self):
 
