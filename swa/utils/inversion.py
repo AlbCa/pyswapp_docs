@@ -23,7 +23,6 @@ def phase_response(x, k, phi0):
     """return the phase"""
     return -k * x + phi0
 
-
 def compute_chi2(data, resp, error):
     """compute rms and chi^2"""
     misfit = data - resp
@@ -66,7 +65,5 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
 
     phi_vel = -2*np.pi*f/m
     phi_model = A@m
-
-    print('nf = ', len(dphi)-len(m))
 
     return phi_vel, phi_model

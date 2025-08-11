@@ -24,8 +24,6 @@ class StdevFunc:
             return None
         return math.sqrt(self.S / (self.k-1))
 
-# TODO problem with connection --> check at the beginning if connection exists and then safely close and reestablish it
-# TODO change persistent con to while for safe connect/close with spyder
 class SQL:
     """Handle an SQLite database"""
     def __init__(self, database):

@@ -784,6 +784,10 @@ class SeismicStream:
         if by == 'time':
             min = kwargs.setdefault('min', 0)
             max = kwargs.setdefault('max', 0)
+            self._trim_times_obspy(min,max)
+        elif by == 'time_v2':
+            min = kwargs.setdefault('min', 0)
+            max = kwargs.setdefault('max', np.inf)
             self._trim_times(min,max)
         elif by == 'offset':
             min = kwargs.setdefault('min', -1e10)
@@ -806,22 +810,50 @@ class SeismicStream:
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
-    def _trim_times(self, start_time, end_time):
-        """cut times of stream"""
+
+    def _trim_times_obspy(self, start_cut_off, end_cut_off):
+        """cut times of stream by providing the amount of time that should be cut-off
+           at the beginning and end off the stream"""
 
         if self._pst is None:
             st_proc = self._st.copy()
         else:
             st_proc = self._pst.copy()
 
-        if isinstance(start_time, numbers.Number) and isinstance(end_time, numbers.Number):
+        if isinstance(start_cut_off, numbers.Number) and isinstance(end_cut_off, numbers.Number):
             for t, trace in enumerate(st_proc.traces):
-                trace.trim(start_time, end_time)
+                trace.trim(start_cut_off, end_cut_off)
 
             self._pst = st_proc
             self._update_params_from_stream(st_proc)
         else:
-            warn_msg = f'Start and end time must be numeric not {type(start_time), type(end_time)}. No process applied.'
+            warn_msg = f'Start and end time must be numeric not {type(start_cut_off), type(end_cut_off)}. No process applied.'
+            self.logger.warning(warn_msg)
+
+    def _trim_times(self, start_time, end_time):
+        """cut times of stream by providing the start and end time of the stream"""
+
+        if self._pst is None:
+            st = self._st.copy()
+        else:
+            st = self._pst.copy()
+
+        amps = self._amps(st=st)
+        nchannels, npts = amps.shape
+
+        t = np.arange(npts) * st[0].stats.delta  # time s
+
+        start_cut_off = start_time
+        end_cut_off = np.max(t) - end_time
+
+        if isinstance(start_cut_off, numbers.Number) and isinstance(end_cut_off, numbers.Number):
+            for t, trace in enumerate(st.traces):
+                trace.trim(start_cut_off, end_cut_off)
+
+            self._pst = st
+            self._update_params_from_stream(st)
+        else:
+            warn_msg = f'Start and end time must be numeric not {type(start_cut_off), type(end_cut_off)}. No process applied.'
             self.logger.warning(warn_msg)
 
     def trim_by_offset(self, min_offset, max_offset):
@@ -2409,15 +2441,17 @@ class SeismicStream:
         else:
             self.logger.error(f'Invalid attribute "{type}".')
 
-    def _plotGeomShort(self):
+    def _plotGeomShort(self,**kwargs):
         """plot acquisition setup of shot file"""
 
         fig = Figure(figsize=(8, 4), constrained_layout=True)
         ax = fig.add_subplot(111)
 
+        color = kwargs.pop('color', 'lightgrey')
+
         all_receiver = self._receiver(self._st)
         ax.scatter(all_receiver, np.zeros(len(all_receiver)), marker='v', c='k',label='active channels',alpha = 0.7)
-        ax.scatter(self.receiver, np.zeros(len(self.receiver)), marker='v', c='lightgrey',label='selected channels')
+        ax.scatter(self.receiver, np.zeros(len(self.receiver)), marker='v', c=color,label='selected channels')
         ax.scatter(self.source, 0.2, marker='*', s= 60,c='r', label='shot location')
 
         # Use the min and max source position instead
@@ -2693,6 +2727,7 @@ class SeismicStream:
         for row in range(len(receiver)):
             ui = np.abs(u[row, fids])
             abs_amps[:, row] = ui
+        abs_amps[np.isnan(abs_amps)] = 0
 
         # db
         abs_amps = 10 * np.log10(abs_amps)

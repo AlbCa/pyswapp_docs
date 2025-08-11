@@ -20,6 +20,7 @@ from matplotlib.figure import Figure
 # TODO adjust visualizations?
 # TODO save picks??
 # TODO pick dc in FK plot
+# TODO load DC
 
 class FigureSwitcher(QMainWindow):
     def __init__(self, figures):
@@ -539,13 +540,16 @@ class DataSwitcherBase(QWidget):
 
             ax = figure.axes[0]
             points = self.points.get(self.current_index, {})
-            picks = self.picks.get(self.current_index, {})
+            picks = self.get_picks()#self.picks.get(self.current_index, {})
 
             self.interactor = self.interaction_class(ax, points=points, data = self.stream, picks = picks, **self.kwargs)
 
             #if self.interactor.picks:
             self.points[self.current_index] = self.interactor.points
             self.picks[self.current_index] = self.interactor.picks
+
+    def get_picks(self):
+        return self.picks.get(self.current_index, {})
 
     def set_group(self, group_index):
         """Used when figures are grouped (e.g., in a multi-view setup)."""
@@ -694,6 +698,18 @@ class DataSwitcherPick(DataSwitcherBase):
             self.canvas.setFocus()
 
             self.write_data_to_sql()
+
+    def get_picks(self):
+
+        label = self.labels[self.current_index]
+        params = {'procset': "'%s'" % self.procset, 'method': "'%s'" % self.method,
+                  'sin': label[0], 'rep': label[1], 'wid': label[2]}
+        curves = self._sql.read_curve(params)
+        if not curves.empty:
+            picks = {0: {'f':curves['frequency'], 'v': curves['velocity']}}
+            return picks
+
+        return None
 
     def write_data_to_sql(self):
 

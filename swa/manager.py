@@ -11,13 +11,9 @@ from .curve import DispersionCurve
 from .curves import CombineCurves
 from .qtapps import *
 
-# TODO
-# 1. Project directory
-# 1.1 Set up project directory
-# 1.1.1 - read and rename seismic data
-# 1.1.2 - create geometry if possible otherwise request geometry
-# 1.1.3 - error handling of all input files
-
+# TODOs
+# TODO: optimization
+# TODO: do not save raw to db or instead of reading files read from db
 # TODO: test on field data
 # TODO: basic sanity checks
 # TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
@@ -25,6 +21,8 @@ from .qtapps import *
 # TODO: documentation!!!
 # TODO: change settings midprocessing
 # TODO: check what is happening with roll-along data
+# TODO: stacking technique SWIP??
+# TODO: avoid unnessesary dicts
 
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
@@ -57,7 +55,7 @@ class BaseManager:
 
         # create/load project
         if os.path.isfile(self.path2db):
-            self._load_project()
+            self._load_project(**kwargs)
         else:
             self._create_project(**kwargs)
 
@@ -149,7 +147,7 @@ class BaseManager:
 
         print('')
 
-    def _load_project(self):
+    def _load_project(self,**kwargs):
         """Load the project"""
 
         self.path2raw = os.path.join(self.prjdir, '01_data/raw')
@@ -180,11 +178,13 @@ class BaseManager:
 
         print('\nExisting procsets:', *prc_sets)
 
-        # load processed data
-        if len(prc_sets) > 1:
-            self.load_procset(prc_sets[-1])
-        else:
-            self.load_procset('raw')
+        if kwargs.pop('load', True):
+            # load processed data
+            if len(prc_sets) > 1:
+                self.load_procset(prc_sets[-1])
+        # else:
+        #     print('Amplitude data loaded from "raw"')
+        #     #self.load_procset('raw')
 
         print('')
 
@@ -301,7 +301,6 @@ class BaseManager:
                 if sin in self.data.keys():
                     if rep in self.data[sin].keys():
                         self._write_data(self.data[sin][rep], sin, rep, 'raw')
-
                         if self.create:
                             self._write_data(self.data[sin][rep], sin, rep, 'proc1')
             else:

@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.path as mpltPath
 from matplotlib.backend_bases import MouseEvent
+from scipy.stats import alpha
 
 from .physics import lorentzian_err
 
@@ -396,7 +397,7 @@ class DCPickingInteractive(DraggablePoints):
 
         if picks is not None:
             self._picks = picks
-            self._update_plot()
+            self._update_plot(show_legend=False,markersize=2,alpha=0.75)
 
         elif points:
             for x, y in points.items():
@@ -438,8 +439,12 @@ class DCPickingInteractive(DraggablePoints):
         self._upper_bound_line = None
         self._lower_bound_line = None
 
-    def _update_plot(self):
+    def _update_plot(self, **kwargs):
         """update plot after event"""
+
+        show_legend = kwargs.pop('show_legend',True)
+        marker_size = kwargs.pop('markersize',5)
+        alpha = kwargs.pop('alpha',1)
 
         # plot picked dispersion curve
         if not self._points:
@@ -473,13 +478,15 @@ class DCPickingInteractive(DraggablePoints):
                         picks['f'],
                         picks['v'],
                         marker="s",
-                        markersize=5,
+                        markersize=marker_size,
                         markeredgecolor='k',
                         color=color[self._mode],
                         linewidth=0,
+                        alpha = alpha,
                         label=f'Mode {self._mode}'
                     )
-                    self.ax.legend(loc='upper right')
+                    if show_legend:
+                        self.ax.legend(loc='upper right')
                     self._pick_lines[self._mode] = pick_line
 
         # draw boundary
