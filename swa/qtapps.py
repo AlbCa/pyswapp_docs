@@ -117,8 +117,8 @@ class DualDataSwitcher(QMainWindow):
         # Link left to right
         self.viewer1.index_changed.connect(self.viewer2.set_group)
         self.viewer1.procset_changed.connect(self.viewer2.set_procset)
+        #self.viewer1.index_pair_changed.connect(self.viewer2.set_procset)
         self.viewer1.plot_changed.connect(self.viewer2.set_plot)
-        #self.viewer1.index_changed.connect(self.viewer2.set_index)
 
     def clean(self):
         self.viewer1.clean()
@@ -133,6 +133,7 @@ class DataSwitcherBase(QWidget):
     index_changed = pyqtSignal(int)
     procset_changed = pyqtSignal(str)
     plot_changed = pyqtSignal(str)
+    index_pair_changed = pyqtSignal(int, str)
 
     def __init__(self, data, sql, plot = 'TX',
                  use_windows=False, interaction_class=None,
@@ -453,6 +454,9 @@ class DataSwitcherBase(QWidget):
         self.canvas.setFocus()
         if not self.is_grouped:
             self.index_changed.emit(self.current_index)
+            self.combo_select_sin.blockSignals(True)
+            self.combo_select_sin.setCurrentIndex(self.current_index)
+            self.combo_select_sin.blockSignals(False)
 
     def show_next_figure(self):
         if not self.labels:
@@ -462,6 +466,9 @@ class DataSwitcherBase(QWidget):
         self.canvas.setFocus()
         if not self.is_grouped:
             self.index_changed.emit(self.current_index)
+            self.combo_select_sin.blockSignals(True)
+            self.combo_select_sin.setCurrentIndex(self.current_index)
+            self.combo_select_sin.blockSignals(False)
 
     def interact(self):
         return None
@@ -564,10 +571,19 @@ class DataSwitcherBase(QWidget):
         """set the procset and update figure"""
         self.current_index = 0
         self.procset = procset
+
         self.procset_changed.emit(procset)
+        # self.index_changed.emit(self.current_index)
+        #self.index_pair_changed.emit(self.current_index, procset)
+
         self.all_labels = self._get_all_labels()
         self.labels = self._get_current_labels()
         self.update_display()
+
+        if not self.is_grouped:
+            self.combo_select_sin.blockSignals(True)
+            self.combo_select_sin.setCurrentIndex(self.current_index)
+            self.combo_select_sin.blockSignals(False)
 
     def set_plot(self, plot):
         """set the plot type and update figure"""
