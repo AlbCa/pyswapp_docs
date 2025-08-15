@@ -434,7 +434,6 @@ class SeismicStream:
         self._pst = self._st.copy()
         self._create_st(amps, par)
         self.apply_geometry(sht, recs)
-        self._update_params_from_amps(amps)
 
     def reset_pst(self):
         self._pst = None
@@ -737,19 +736,24 @@ class SeismicStream:
 
         return norm_amps
 
-    def _apply_taper(self):
+    def _apply_taper(self, st = None, inplace = True):
         """apply taper"""
 
-        if self._pst is None:
-            st_proc = self._st.copy()
-        else:
-            st_proc = self._pst.copy()
+        if st is None:
 
-        amps = self._amps(st=st_proc)
+            if self._pst is None:
+                st = self._st.copy()
+            else:
+                st = self._pst.copy()
+
+        amps = self._amps(st=st)
         tapered_amps = self._taper_amps(amps)
-        self._amps2st(tapered_amps)
 
-        self.tapered = True
+        if inplace:
+            self._amps2st(tapered_amps)
+        else:
+            return tapered_amps
+
 
     def _taper_amps(self, amps):
         """apply taper window"""
@@ -880,9 +884,9 @@ class SeismicStream:
                 # update stream
                 self._pst = st_new
                 self._update_params_from_stream(st_new)
-            else:
-                warn_msg = 'Min and max offset out of bounds. No process applied to stream.'
-                self.logger.warning(warn_msg)
+            # else:
+            #     warn_msg = 'Min and max offset out of bounds. No process applied to stream.'
+            #     self.logger.warning(warn_msg)
 
             return oids
         else:
@@ -1357,26 +1361,29 @@ class SeismicStream:
     #     dynamic linear moveout correction by Park et al. (1998)
     #     """
 
+    def _add_fk_data_to_dict(self,FK_data, theta, kw , freq, iX, iT):
+        self.FK_data.update({'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT})
+
     # %% wavefield transformation
-    def _fk_backtransform(self,FK_unwrap,iT,iX):
+    def _inverse_fk_transform(self,FK_unwrap,iT,iX):
         """Transformation to x-t domain"""
 
         iF = nextpow2(iT)[1]
         FK = np.zeros((iF,iF)).astype("complex")
 
-        pos_freq = iF // 2
+        pos_freq = FK.shape[0] // 2
         FK_unwrap = np.flipud(FK_unwrap)
 
         # exploit symmetry
         # top half
-        FK[:pos_freq] = FK_unwrap
+        FK[:pos_freq+1] = FK_unwrap
         # bottom half
-        FK[pos_freq:] = np.conj(np.rot90(FK_unwrap[:], 2))
+        FK[pos_freq+1:] = np.conj(np.flipud(np.fliplr(FK_unwrap[1:-1])))
 
         # back transformation
-        FK = np.fft.ifftshift(np.transpose(np.conj(FK)))
-        amps = np.fft.ifft2(FK,s=(iF,iF)).real
-        amps = amps[:iX,:iT]
+        FK = np.fft.ifftshift(FK)
+        amps_padded = np.fft.ifft2(FK,s=(iF,iF)).real
+        amps = np.transpose(amps_padded)[:iX,:iT]
 
         # source-receiver offsets
         receiver = self.receiver
@@ -1386,23 +1393,23 @@ class SeismicStream:
 
         return amps
 
-    def _fk_transform(self, taper_amps = True):
+    def _fk_transform(self, taper_amps = True, **kwargs):
         """Transformation to F-K domain"""
-        receiver = self.receiver
-        source = self.source
-
-        # amplitude data & processing
-        if taper_amps:
-            self._apply_taper()
 
         if self._pst is None:
             st = self._st.copy()
         else:
             st = self._pst.copy()
 
-        amps = self._amps(st=st)
+        # amplitude data & processing
+        if taper_amps:
+            amps = self._apply_taper(st = st, inplace = False)
+        else:
+            amps = self._amps(st=st)
 
         # source-receiver offsets
+        receiver = self.receiver
+        source = self.source
         if source > receiver[-1]:
             amps = np.flipud(amps)
 
@@ -1414,30 +1421,31 @@ class SeismicStream:
         iX,iT = amps.shape
         iF = nextpow2(iT)[1]
 
+        # FK transformation
+        amps = np.transpose(amps)
+        FK = np.fft.fft2(amps,s=(iF,iF))
+
+        # shift to 0|0
+        FK = np.fft.fftshift(FK)
+
+        # select only positive frequencies (upper half)
+        pos_freq = FK.shape[0] // 2
+        FK_unwrap = FK[:pos_freq+1]
+        FK_unwrap = np.flipud(FK_unwrap)
+
         # wavenumber and frequencies
-        freq = np.fft.fftfreq(iF, dt)
         k = np.fft.fftfreq(iF, dx)
         kw = k*2*np.pi
+        kw = np.fft.fftshift(kw)
 
-        # FK transformation
-        FK = np.fft.fft2(amps,s=(iF,iF))
-        FK = np.fft.fftshift(np.conjugate(np.transpose(FK)))
-
-        # select only positive frequencies
-        pos_freq = FK.shape[0] // 2
-        FK_unwrap = FK[:pos_freq]
-        FK_unwrap = np.flipud(FK_unwrap)
-        FK_unwrap = np.fft.fftshift(FK_unwrap,axes=1)
+        fpos = np.linspace(0, 0.5/dt, iF // 2+1)
 
         theta = np.angle(FK_unwrap)
         FK_abs = abs(FK_unwrap)
 
-        self._add_fk_data_to_dict(FK_abs, theta, kw, freq, iX, iT)
+        self._add_fk_data_to_dict(FK_abs, theta, kw, fpos, iX, iT)
 
-        return FK_abs, theta, kw, freq,iX,iT
-
-    def _add_fk_data_to_dict(self,FK_data, theta, kw , freq, iX, iT):
-        self.FK_data.update({'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT})
+        return FK_abs, theta, kw, fpos,iX,iT
 
     def fk_filter_from_pick_ui(self, points, key = 't', **kwargs):
         """apply fk filter from picking boundaries"""
@@ -1447,312 +1455,153 @@ class SeismicStream:
         else:
             FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
 
-        npoints = FK_abs.shape[1]
+        df = freq[1] - freq[0]
 
-        fpos = freq[:npoints // 2]
-        df = fpos[1] - fpos[0]
+        k_grid, f_grid = np.meshgrid(kw, freq)
+        mask = np.ones_like(FK_abs, dtype=float)
 
-        # kwpos = np.linspace(0, np.max(kw), npoints)
-        kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-
-        if self.kmax is None:
-            self.kmax = np.max(kwpos[:npoints // 2])
-
-        # tapering function
-        taper_func = getattr(signal.windows, 'hann')
-        taper_len = int(kwargs.pop('taper_length', 5) // df)
-        taper_win = taper_func(2 * taper_len)
-
-        FK_abs_filt = FK_abs.copy()
-
-        points_list = []
-        if len(points) > 0:
+        # Interpolate user-defined fk boundary
+        if points:
             x, y = zip(*sorted(points.items()))
-            for i in range(len(x)):
-                points_list.append((x[i], y[i]))
-
-            fp = np.array([np.round(points_list[i][1], 4) for i in range(len(points_list))])
-            kp = np.array([np.round(points_list[i][0], 4) for i in range(len(points_list))])
-            f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
-            kpp = f(fpos)
-
-            if key == 't':
-                window = np.zeros_like(FK_abs_filt[0, :])
-                for j in range(len(fpos)):
-                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                    window[k_min_tmp:] = 1
-                    if k_min_tmp > taper_len - 1:
-                        window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
-                    else:
-                        window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
-
-                    FK_abs_filt[j, :] *= window
-                    window *= 0
+            k_boundary = np.array(x)
+            f_boundary = np.array(y)
+            f_interp = interpolate.interp1d(f_boundary, k_boundary, bounds_error=False, fill_value="extrapolate")
+            k_limit = f_interp(np.abs(f_grid))  # apply absolute to support symmetry
 
             if key == 'b':
-                window = np.ones_like(FK_abs_filt[0, :])
-                for j in range(len(fpos)):
-                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                    window[k_min_tmp:] = 0
-                    if k_min_tmp < len(kwpos) - taper_len:
-                        window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
-                    else:
-                        window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
+                mask[np.abs(k_grid) >= k_limit] = 0
+            elif key == 't':
+                mask[np.abs(k_grid) <= k_limit] = 0
 
-                    FK_abs_filt[j, :] *= window
-                    window = np.ones_like(FK_abs_filt[0, :])
+            # Optional: Apply taper (Hann window)
+            taper_len = int(kwargs.pop('taper_length', 5) / (df))
+            taper = signal.windows.hann(2 * taper_len)
+            for j in range(mask.shape[0]):
+                k_cut = k_limit[j]
+                idx = np.where(np.abs(kw) >= k_cut)[0]
+                if len(idx) > 0:
+                    start = max(idx[0] - taper_len, 0)
+                    end = min(idx[0] + taper_len, len(kw))
+                    mask[j, start:end] *= taper[:end - start]
+
+        # Apply mask to complex FK spectrum
+        FK_abs_filt = FK_abs * mask
 
         # back transformation
         FK_filt = FK_abs_filt * np.exp(1j * theta)
-        FK_filt = np.fft.ifftshift(FK_filt, axes=1)
-        FK_filt[:,:npoints // 2] = 0
+        FK_filt[:, :FK_abs_filt.shape[1]//2] = 0
 
-        amps = self._fk_backtransform(FK_filt, iT, iX)
+        amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
 
     def reset_FK(self):
         """Reset FK filter"""
         self._pst = self._st.copy()
 
-    # #################
-    # # DEPRECATED!!!!!
-    # def _fk_filter_from_pick(self, fname=None, show=False, **kwargs):
-    #     """apply fk filter by picking boundaries"""
-    #
-    #     # transformation
-    #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform()
-    #
-    #     npoints = FK_abs.shape[1]
-    #
-    #     fpos = freq[:npoints // 2]
-    #     df = fpos[1] - fpos[0]
-    #     fmin = np.argmin(np.abs(fpos - self.fmin))
-    #     fmax = np.argmin(np.abs(fpos - self.fmax))
-    #
-    #     # kwpos = np.linspace(0, np.max(kw), npoints)
-    #     kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-    #
-    #     if self.kmax is None:
-    #         self.kmax = np.max(kwpos[:npoints // 2])
-    #
-    #     kmin = np.argmin(np.abs(kwpos - self.kmin))
-    #     kmax = np.argmin(np.abs(kwpos - self.kmax))
-    #     #kmax = np.max(kwpos[:npoints // 2])
-    #
-    #     # tapering function
-    #     taper_func = getattr(signal.windows, 'hann')
-    #     taper_len = int(kwargs.pop('taper_length', 5) // df)
-    #     taper_win = taper_func(2 * taper_len)
-    #
-    #     FK_abs_filt = FK_abs.copy()
-    #
-    #     terminate = False
-    #     while terminate == False:
-    #
-    #         # fig, ax = plt.subplots(2, figsize=(6, 4))
-    #         fig = plt.figure(figsize=(8, 5), constrained_layout=True)
-    #         gs = fig.add_gridspec(5, 2)
-    #         ax0 = fig.add_subplot(gs[0, 0:2])
-    #         ax1 = fig.add_subplot(gs[1:5, 0:2])
-    #
-    #         self._plotGeometry(axes=ax0,show=False)
-    #         self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax1, **kwargs)  # xlimit=np.max(kwpos[:npoints//2]))
-    #         text = '\n'.join((
-    #             r'$\bf{Keyboard \quad commands:}$',
-    #             r'Press $\bf{e}$ to stop the process.',
-    #             r'Press $\bf{t}$ for top or $\bf{b}$ for bottom filter.'))
-    #         at = AnchoredText(text,
-    #                           loc='lower right', prop=dict(size=6), frameon=True, bbox_to_anchor=(1, 1.05),
-    #                           bbox_transform=ax1.transAxes
-    #                           )
-    #         ax1.add_artist(at)
-    #
-    #         plot = FKFilterInteractive(ax1)
-    #
-    #         ax1.set_title(f'Top filter active', fontweight='bold')
-    #         #plt.tight_layout()
-    #         plt.show()
-    #
-    #         terminate = plot.terminate
-    #         key = plot.key
-    #
-    #         points = []
-    #         if len(plot.points) > 0:
-    #             x, y = zip(*sorted(plot.points.items()))
-    #             for i in range(len(x)):
-    #                 points.append((x[i], y[i]))
-    #
-    #             fp = np.array([np.round(points[i][1], 4) for i in range(len(points))])
-    #             kp = np.array([np.round(points[i][0], 4) for i in range(len(points))])
-    #
-    #             # write to file
-    #             if fname is not None:
-    #
-    #                 path, _ = os.path.split(self.fname)
-    #                 safe_makedirs(path)
-    #
-    #                 if os.path.isfile(fname):
-    #                     warn_msg = 'File already exists. Fk filter will be appended.'
-    #                     self.logger.warning(warn_msg)
-    #
-    #                 file = open(fname, "a+")
-    #                 file.write(f'{self.pre}\t{key}\t{len(fp)}\n')
-    #                 for i in range(len(fp)):
-    #                     file.write(f'{kp[i]}\t{fp[i]}\n')
-    #
-    #         # apply filter
-    #         if not terminate:
-    #             if len(points) > 0:
-    #
-    #                 f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
-    #                 kpp = f(fpos)
-    #
-    #                 if key == 't':
-    #                     window = np.zeros_like(FK_abs_filt[0, :])
-    #                     for j in range(len(fpos)):
-    #                         k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-    #                         window[k_min_tmp:] = 1
-    #                         if k_min_tmp > taper_len - 1:
-    #                             window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
-    #                         else:
-    #                             window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
-    #
-    #                         FK_abs_filt[j, :] *= window
-    #                         window *= 0
-    #
-    #                 if key == 'b':
-    #                     window = np.ones_like(FK_abs_filt[0, :])
-    #                     for j in range(len(fpos)):
-    #                         k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-    #                         window[k_min_tmp:] = 0
-    #                         if k_min_tmp < len(kwpos) - taper_len:
-    #                             window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
-    #                         else:
-    #                             window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
-    #
-    #                         FK_abs_filt[j, :] *= window
-    #                         window = np.ones_like(FK_abs_filt[0, :])
-    #
-    #     # back transformation
-    #     FK_filt = FK_abs_filt * np.exp(1j * theta)
-    #     FK_filt = np.fft.ifftshift(FK_filt, axes=1)
-    #     FK_filt[:,:npoints // 2] = 0
-    #     amps = self._fk_backtransform(FK_filt, iT, iX)
-    #     self._amps2st(amps)
-    #
-    #     if show:
-    #         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-    #         self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
-    #         self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
-    #         ax[0].set_title('Raw data', fontweight='bold')
-    #         ax[1].set_title('Post fk filter', fontweight='bold')
-    #         plt.tight_layout()
-    #         plt.show()
-    #
-    # #################
-
     def _fk_filter_from_file(self, fname=None, show=False, **kwargs):
         """apply the fk filter based on a file containing the bounds"""
 
-        # transformation
-        if not self.FK_data:
-            FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
-        else:
-            FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
+        raise NotImplementedError('Not tested in new version')
 
-        npoints = FK_abs.shape[1]
-
-        fpos = freq[:npoints // 2]
-        df = fpos[1] - fpos[0]
-        fmin = np.argmin(np.abs(fpos - self.fmin))
-        fmax = np.argmin(np.abs(fpos - self.fmax))
-
-        # kwpos = np.linspace(0, np.max(kw), npoints)
-        kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-        #kmax = np.max(kwpos[:npoints // 2])
-
-        if self.kmax is None:
-            self.kmax = np.max(kwpos[:npoints // 2])
-
-        kmin = np.argmin(np.abs(kwpos - self.kmin))
-        kmax = np.argmin(np.abs(kwpos - self.kmax))
-
-        # tapering function
-        taper_func = getattr(signal.windows, 'hann')
-        taper_len = int(kwargs.pop('taper_length', 5) // df)
-        taper_win = taper_func(2 * taper_len)
-
-        # plt.figure();plt.imshow(np.flipud(FK_abs),extent = (kw[0], 2*kw[255], freq[0], freq[255]), aspect='auto')
-
-        FK_abs_filt = FK_abs.copy()
-
-        # import previously created filter
-        if fname is not None:
-            if os.path.isfile(fname):
-                points_dict = read_FKfilter(fname)
-
-                for key, point_list in points_dict.items():
-
-                    for points in point_list:
-                        if len(points) > 0:
-
-                            fp = points[:, 1]  # frequency
-                            kp = points[:, 0]  # wavenumber
-
-                            f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
-                            kpp = f(fpos)
-
-                            if key == 't':
-                                window = np.zeros_like(FK_abs_filt[0, :])
-                                for j in range(len(fpos)):
-                                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                                    window[k_min_tmp:] = 1
-                                    if k_min_tmp > taper_len - 1:
-                                        window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
-                                    else:
-                                        window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
-
-                                    FK_abs_filt[j, :] *= window
-                                    window *= 0
-
-                            elif key == 'b':
-                                window = np.ones_like(FK_abs_filt[0, :])
-                                for j in range(len(fpos)):
-                                    k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-                                    window[k_min_tmp:] = 0
-                                    if k_min_tmp < len(kwpos) - taper_len:
-                                        window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
-                                    else:
-                                        window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
-
-                                    FK_abs_filt[j, :] *= window
-                                    window = np.ones_like(FK_abs_filt[0, :])
-                            else:
-                                raise ValueError('Incorrect key in file. '
-                                                 'Use either "t" for top or "b" for bottom mute.')
-
-                # back transformation
-                FK_filt = FK_abs_filt * np.exp(1j * theta)
-                FK_filt = np.fft.ifftshift(FK_filt, axes=1)
-                FK_filt[:, :npoints // 2] = 0
-                amps = self._fk_backtransform(FK_filt, iT, iX)
-                self._amps2st(amps)
-
-                if show:
-                    fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-                    self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
-                    self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
-                    ax[0].set_title('Raw data', fontweight='bold')
-                    ax[1].set_title('Post fk filter', fontweight='bold')
-                    plt.tight_layout()
-                    plt.show()
-
-            else:
-                warn_msg = "Incorrect filename provided for FK filtering. No filtering applied."
-                self.logger.warning(warn_msg)
-        else:
-            warn_msg = "No file provided with FK filter. No filtering applied."
-            self.logger.warning(warn_msg)
+        # # transformation
+        # if not self.FK_data:
+        #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
+        # else:
+        #     FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
+        #
+        # npoints = FK_abs.shape[1]
+        #
+        # fpos = freq[:npoints // 2]
+        # df = fpos[1] - fpos[0]
+        # fmin = np.argmin(np.abs(fpos - self.fmin))
+        # fmax = np.argmin(np.abs(fpos - self.fmax))
+        #
+        # # kwpos = np.linspace(0, np.max(kw), npoints)
+        # kwpos = np.linspace(0, 2 * np.max(kw), npoints)
+        # #kmax = np.max(kwpos[:npoints // 2])
+        #
+        # if self.kmax is None:
+        #     self.kmax = np.max(kwpos[:npoints // 2])
+        #
+        # kmin = np.argmin(np.abs(kwpos - self.kmin))
+        # kmax = np.argmin(np.abs(kwpos - self.kmax))
+        #
+        # # tapering function
+        # taper_func = getattr(signal.windows, 'hann')
+        # taper_len = int(kwargs.pop('taper_length', 5) // df)
+        # taper_win = taper_func(2 * taper_len)
+        #
+        # # plt.figure();plt.imshow(np.flipud(FK_abs),extent = (kw[0], 2*kw[255], freq[0], freq[255]), aspect='auto')
+        #
+        # FK_abs_filt = FK_abs.copy()
+        #
+        # # import previously created filter
+        # if fname is not None:
+        #     if os.path.isfile(fname):
+        #         points_dict = read_FKfilter(fname)
+        #
+        #         for key, point_list in points_dict.items():
+        #
+        #             for points in point_list:
+        #                 if len(points) > 0:
+        #
+        #                     fp = points[:, 1]  # frequency
+        #                     kp = points[:, 0]  # wavenumber
+        #
+        #                     f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
+        #                     kpp = f(fpos)
+        #
+        #                     if key == 't':
+        #                         window = np.zeros_like(FK_abs_filt[0, :])
+        #                         for j in range(len(fpos)):
+        #                             k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+        #                             window[k_min_tmp:] = 1
+        #                             if k_min_tmp > taper_len - 1:
+        #                                 window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
+        #                             else:
+        #                                 window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
+        #
+        #                             FK_abs_filt[j, :] *= window
+        #                             window *= 0
+        #
+        #                     elif key == 'b':
+        #                         window = np.ones_like(FK_abs_filt[0, :])
+        #                         for j in range(len(fpos)):
+        #                             k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
+        #                             window[k_min_tmp:] = 0
+        #                             if k_min_tmp < len(kwpos) - taper_len:
+        #                                 window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
+        #                             else:
+        #                                 window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
+        #
+        #                             FK_abs_filt[j, :] *= window
+        #                             window = np.ones_like(FK_abs_filt[0, :])
+        #                     else:
+        #                         raise ValueError('Incorrect key in file. '
+        #                                          'Use either "t" for top or "b" for bottom mute.')
+        #
+        #         # back transformation
+        #         FK_filt = FK_abs_filt * np.exp(1j * theta)
+        #         FK_filt = np.fft.ifftshift(FK_filt, axes=1)
+        #         FK_filt[:, :npoints // 2] = 0
+        #         amps = self._inverse_fk_transform(FK_filt, iT, iX)
+        #         self._amps2st(amps)
+        #
+        #         if show:
+        #             fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+        #             self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
+        #             self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
+        #             ax[0].set_title('Raw data', fontweight='bold')
+        #             ax[1].set_title('Post fk filter', fontweight='bold')
+        #             plt.tight_layout()
+        #             plt.show()
+        #
+        #     else:
+        #         warn_msg = "Incorrect filename provided for FK filtering. No filtering applied."
+        #         self.logger.warning(warn_msg)
+        # else:
+        #     warn_msg = "No file provided with FK filter. No filtering applied."
+        #     self.logger.warning(warn_msg)
 
 
     def transform(self, method = 'phaseshift', **kwargs):
@@ -1801,15 +1650,15 @@ class SeismicStream:
         source = self.source
 
         # amplitude data & processing
-        if taper_amps:
-            self._apply_taper()
-
         if self._pst is None:
             st = self._st.copy()
         else:
             st = self._pst.copy()
 
-        amps = self._amps(st=st)
+        if taper_amps:
+            amps = self._apply_taper(st=st, inplace=False)
+        else:
+            amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -1902,15 +1751,15 @@ class SeismicStream:
         offsets = self._aoffsets(receiver, source)
 
         # amplitude data & processing
-        if taper_amps:
-            self._apply_taper()
-
         if self._pst is None:
             st = self._st.copy()
         else:
             st = self._pst.copy()
 
-        amps = self._amps(st=st)
+        if taper_amps:
+            amps = self._apply_taper(st=st, inplace=False)
+        else:
+            amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -1981,15 +1830,15 @@ class SeismicStream:
         offsets = self._aoffsets(receiver,source)
         min_nrec = kwargs.pop('min_nrec',12)
 
-        if taper_amps:
-            self._apply_taper()
-
         if self._pst is None:
             st = self._st.copy()
         else:
             st = self._pst.copy()
 
-        amps = self._amps(st=st)
+        if taper_amps:
+            amps = self._apply_taper(st=st, inplace=False)
+        else:
+            amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -2088,21 +1937,21 @@ class SeismicStream:
             warn_msg = 'No dispersion curve extracted.'
             self.logger.warning(warn_msg)
 
-    def compute_phasediffs(self, taper_amps):
+    def compute_phasediffs(self, taper_amps = False):
         """compute phase differences between adjacent receivers for one shot file"""
 
         receiver = self.receiver
         source = self.source
-
-        if taper_amps:
-            self._apply_taper()
 
         if self._pst is None:
             st = self._st.copy()
         else:
             st = self._pst.copy()
 
-        amps = self._amps(st=st)
+        if taper_amps:
+            amps = self._apply_taper(st=st, inplace=False)
+        else:
+            amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -2568,12 +2417,10 @@ class SeismicStream:
         step = kwargs.pop('tick_scale', len(receiver)//3)
         alpha = kwargs.pop('alpha',0.5)
         show_map = kwargs.pop('show_map', False)
-        detrend = kwargs.pop('detrend', False)
 
         amps = self._amps(st=st)
+        amps = self._detrend_signal(amps)
 
-        if detrend:
-           amps = self._detrend_signal(amps)
         if self.norm_amps:
            amps = self._normalize_amps(amps)
 
@@ -2881,11 +2728,6 @@ class SeismicStream:
 
         if axes is None:
             fig, ax = plt.subplots(1, 3, figsize=(16, 4))
-            # fig = Figure(figsize=(16,4), constrained_layout=True)
-            # ax0 = fig.add_subplot(1, 3, 1)
-            # ax1 = fig.add_subplot(1, 3, 2)
-            # ax2 = fig.add_subplot(1, 3, 3)
-            # ax = [ax0,ax1,ax2]
         else:
             ax = axes
             fig = axes.figure
@@ -2913,6 +2755,8 @@ class SeismicStream:
         """plot FK image"""
 
         figsize = kwargs.pop('figsize', (8, 8))
+        cmap = kwargs.pop('cmap', 'viridis')
+
         if axes is None:
             if gui:
                 fig = Figure(figsize=figsize, constrained_layout=True)
@@ -2923,55 +2767,60 @@ class SeismicStream:
             ax = axes
             fig = ax.figure
 
-        # transformation
         if FK_data is None:
             FK_data, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
-            npoints = FK_data.shape[1]
-            kwpos = np.linspace(0, 2 * np.max(kw), npoints)
+        else:
+            iF = nextpow2(self.npts)[1]
+            k = np.fft.fftfreq(iF, self.dx)
+            kw = k * 2 * np.pi
+            freq = np.linspace(0, 0.5/self.dt, iF // 2+1)
 
-            fpos = freq[:npoints // 2]
-            fmin = np.argmin(np.abs(fpos - self.fmin))
-            fmax = np.argmin(np.abs(fpos - self.fmax))
+        # Determine kmin/kmax values
+        kmax_val = kwargs.pop('kmax', self.kmax if self.kmax is not None else np.max(kw))
+        kmin_val = kwargs.pop('kmin', self.kmin if self.kmin is not None else np.min(kw))
+        self.kmax = kmax_val
+        self.kmin = kmin_val
 
-            if self.kmax is None:
-                self.kmax = np.max(kwpos[:npoints // 2])
+        # Frequency and wavenumber indices
+        fmin_idx = np.argmin(np.abs(freq - self.fmin))
+        fmax_idx = np.argmin(np.abs(freq - self.fmax))
+        kmin_idx = np.argmin(np.abs(kw - self.kmin))
+        kmax_idx = np.argmin(np.abs(kw - self.kmax))
 
-            kmax = kwargs.pop('kmax', None)
-            if kmax is None:
-                self.kmax = np.max(kwpos[:npoints // 2])
-            else:
-                self.kmax = kmax
+        # Slice FK_data if it was generated internally
+        if FK_data is not None and FK_data.ndim == 2:
+            FK_data = FK_data[fmin_idx:fmax_idx, kmin_idx:kmax_idx]
 
-            kmin = np.argmin(np.abs(kwpos - self.kmin))
-            kmax = np.argmin(np.abs(kwpos - self.kmax))
+            if FK_data.size == 0:
+                return None
 
-            FK_data = FK_data[fmin:fmax,kmin:kmax]
-
-        if FK_data.shape[1] > 0:
-            # Normalization
+            # Normalize if requested
             if self.norm_power:
                 FK_data = self._norm_power(FK_data)
                 label = "amplitudes (normalized)"
             else:
                 label = "amplitudes"
 
-            img = ax.imshow(abs(FK_data), aspect='auto', origin='lower',
-                               extent=[self.kmin, self.kmax, self.fmin, self.fmax],
-                               cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
-            ax.set_ylabel('frequency (Hz)')
+            # Plot image
+            img = ax.imshow(
+                np.abs(FK_data),
+                aspect='auto',
+                origin='lower',
+                extent=[self.kmin, self.kmax, self.fmin, self.fmax],
+                cmap=plt.cm.get_cmap(cmap)
+            )
+
             ax.set_xlabel('wavenumber (rad/m)')
+            ax.set_ylabel('frequency (Hz)')
             ax.grid(linestyle=':')
 
-            for axis in ['top', 'bottom', 'left', 'right']:
-                ax.spines[axis].set_linewidth(1)
+            for spine in ax.spines.values():
+                spine.set_linewidth(1)
 
             plt.colorbar(img, label=label, ax=ax)
 
             if outfile:
-                if fmt:
-                    fig.savefig(outfile, format=fmt)
-                else:
-                    fig.savefig(outfile)
+                fig.savefig(outfile, format=fmt if fmt else None)
 
             if axes is not None:
                 return ax

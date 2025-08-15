@@ -1853,7 +1853,7 @@ class Tomo2DManager(BaseManager):
 
         self.set_loadset(procset)
 
-    def preprocess_streams(self, type = 'filter', procset = None, **kwargs):
+    def preprocess_streams(self, type='trim', procset=None, apply_to='all', use_windows=False, **kwargs):
         """
         Apply preprocessing steps to current selection or all data sets
 
@@ -1861,7 +1861,13 @@ class Tomo2DManager(BaseManager):
         ----------
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
+        apply_to : str, default 'all', whether to apply function to all streams or just the current selection
+        use_windows : bool, default False, whether to apply the processing to windows
         """
+
+        # # check if process exists
+        # if type not in ['filter', 'trim']:
+        #     raise AttributeError(f'Attribute can be "filter" or "trim" not {type}.')
 
         if procset is None:
             procset = self._procset
@@ -1869,24 +1875,38 @@ class Tomo2DManager(BaseManager):
         if procset != self._procset:
             self.set_new_procset(procset)
 
-        starttime = time.time()
+        # Apply process to current selection only
+        if apply_to == 'cur':
+            if self.current_stream is None:
+                self.select_data(inplace=True, verbose=False)
 
-        for sin in self.data.keys():
-            for rep in self.data[sin].keys():
+            starttime = time.time()
+            print(f'Applying {type} to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
-                self.select_data(sin, rep, inplace=True, verbose=False)
+            self._preprocess(type, procset=procset, use_windows=use_windows, **kwargs)
 
-                sys.stdout.write(f'\rApplying {type} to (SIN,REP) = 'f'({sin}, {rep}) ..... ')
-                sys.stdout.flush()
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
 
-                self._preprocess(type, procset=procset, use_windows=True, **kwargs)
+        # Apply process to all data sets
+        elif apply_to == 'all':
+            starttime = time.time()
 
-        endtime = time.time()
-        print(f'{np.round(endtime - starttime, 2)} s')
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+                    self.select_data(sin, rep, inplace=True, verbose=False)
+
+                    sys.stdout.write(f'\rApplying {type} to (SIN,REP) = ({sin}, {rep}) ..... ')
+                    sys.stdout.flush()
+
+                    self._preprocess(type, procset=procset, use_windows=use_windows, **kwargs)
+
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
 
         self.set_loadset(procset)
 
-    def preprocess(self, type='trim', procset = None, **kwargs):
+    def preprocess(self, type='trim', procset=None, apply_to='all', use_windows=False, **kwargs):
         """
         Apply preprocessing steps to current selection or all data sets
 
@@ -1894,9 +1914,11 @@ class Tomo2DManager(BaseManager):
         ----------
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
+        apply_to : str, default 'all', whether to apply function to all streams or just the current selection
+        use_windows : bool, default False, whether to apply the processing to windows
         """
 
-        self.preprocess_streams(type, procset, **kwargs)
+        self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
 
     def compute_phasediff(self, procset = None, **kwargs):
         """

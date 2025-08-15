@@ -971,10 +971,12 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             if points:
                 stream = self.interactor.filter()
                 self.points[self.current_index] = {}
+                self.kwargs['taper_amps'] = False
             # reset
             else:
                 stream = copy.deepcopy(self.stream) #self.select_data(label[0], label[1])
                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
+                self.kwargs['taper_amps'] = True
 
             # overwrite in db
             self._write_data(stream, label[0], label[1], self.procset, label[2])

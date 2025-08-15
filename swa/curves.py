@@ -17,44 +17,8 @@ class CombineCurves:
 
     def __init__(self):
 
-        self.settings = None
         self.data = {}
         self.dc_mean = None
-
-    def read(self, path2dc, path2geom = None):
-        """import data sets"""
-
-        if path2geom is None:
-            path2geom = os.path.join(path2dc,'../1_geom/xmid.txt')
-
-        xmids = np.loadtxt(path2geom)
-        fnames = glob.glob(os.path.join(path2dc, '*'))
-
-        if len(fnames) != len(xmids):
-            raise ValueError('Number of files does not match number of receiver spread midpoints. '
-                             '%d != %d' % (len(fnames), len(xmids)))
-
-        data = {}
-
-        color = plt.cm.viridis(np.linspace(0, 0.9, len(fnames)))
-
-        for i,(xmid,fname) in enumerate(zip(xmids,fnames)):
-
-            if xmid not in data.keys():
-                data[xmid] = {}
-
-            data[xmid][i] = {}
-
-            head,tail = os.path.split(fname)
-            dc = DispersionCurve()
-            dc.read(fname)
-
-            data[xmid][i] = {'data': dc,
-                                       'data_filt': dc,
-                                      'label': tail,
-                                      'color': color[i].reshape(1,-1)}
-        self.data = data
-
 
     def append(self,curve, xmid, source=None,color = 'b'):
 
@@ -121,37 +85,33 @@ class CombineCurves:
     def _dc2vec(data_dict):
         """convert dict containing all dcs to vector"""
 
-        data_dict = data_dict.copy()
-        if 'cmb' in data_dict.keys():
-            data_dict.pop('cmb')
+        # Remove 'cmb' if present
+        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
 
-        ndcs = len(data_dict)  # number of dispersion curves
-        len_dcs_vec = np.zeros((ndcs, 1))  # npts of each dispersion curves
+        lam_list = []
+        vr_list = []
 
-        for i in range(ndcs):
-            npts = data_dict[i]['data_filt'].npts
-            len_dcs_vec[i] = npts
+        for entry in data_dict.values():
+            data = entry['data_filt'].data
+            lam = np.asarray(data.lam)
+            vr = np.asarray(data.vr)
 
-        lam_data = np.zeros((ndcs, int(np.max(len_dcs_vec))))
-        v_data = np.zeros((ndcs, int(np.max(len_dcs_vec))))
+            # Ensure matching shapes and exclude invalid/masked/zero values
+            valid = (lam > 0) & np.isfinite(vr)
+            lam_list.append(lam[valid])
+            vr_list.append(vr[valid])
 
-        for i in range(ndcs):
-            data = data_dict[i]['data_filt'].data
-            lam_data[i, range(len(data.lam))] = data.lam
-            v_data[i, range(len(data.lam))] = data.vr
+        if lam_list:
+            lam_vec = np.concatenate(lam_list).reshape(-1, 1)
+            vr_vec = np.concatenate(vr_list).reshape(-1, 1)
+        else:
+            lam_vec = np.empty((0, 1))
+            vr_vec = np.empty((0, 1))
 
-        sz1, sz2 = lam_data.shape
-        lam_vec = np.transpose(lam_data).reshape(sz1 * sz2, 1)
-        v_vec = np.transpose(v_data).reshape(sz1 * sz2, 1)
-
-        lam_zeros = np.where(lam_vec > 0)[0]
-        lam_vec = lam_vec[lam_zeros]
-        v_vec = v_vec[lam_zeros]
-
-        return lam_vec, v_vec
+        return lam_vec, vr_vec
 
     @staticmethod
-    def _binning(lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, **kwargs):
+    def _binning(lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None, **kwargs):
         """combination of dispersion curves from SW measurements (Olafsdottir, 2018)"""
 
         # %% binning process
@@ -164,109 +124,72 @@ class CombineCurves:
         #minvelerr = kwargs.pop('minvelerr', None) # minimum error (in m/s)
 
         # define wavelength intervals
-        qmin = int(np.round((np.log(lam_min) / np.log(2) + 1 / (2 * a)) * a - 1))
+        lam_vec = lam_vec.flatten()
+        vel_vec = vel_vec.flatten()
 
-        lam_eq = []
-        lam_lo = []
-        lam_up = []
-        lam_max_bound = 0
+        qmin = int(np.round((np.log2(lam_min) + 1 / (2 * a)) * a - 1))
 
-        qmax = qmin
+        lam_eq, vel_mean, vel_std = [], [], []
 
-        while lam_max_bound <= lam_max:
+        q = qmin
+        while True:
+            lam_eqi = 2 ** ((q - 1) / a)
+            lam_lo = lam_eqi * 2 ** (-1 / (2 * a))
+            lam_up = lam_eqi * 2 ** (1 / (2 * a))
 
-            lam_eqi = 2 ** ((qmax - 1) / a)
-            lam_min_bound = lam_eqi * (2 ** (-1 / (2 * a)))
-            lam_max_bound = lam_eqi * (2 ** (1 / (2 * a)))
+            if lam_lo > lam_max:
+                break
 
-            lam_eq.append(lam_eqi)
-            lam_lo.append(lam_min_bound)
-            lam_up.append(lam_max_bound)
+            idx = (lam_vec >= lam_lo) & (lam_vec <= lam_up)
+            if np.count_nonzero(idx) > 1:
+                vels = vel_vec[idx]
+                vel_mean.append(np.nanmean(vels))
+                vel_std.append(np.nanstd(vels))
+                lam_eq.append(lam_eqi)
 
-            qmax += 1
+            q += 1
 
-        # compute statistics for data inside bins
-        vel_mean = []
-        vel_std = []
-        lam_mean = []
-
-        for i in range(len(lam_eq)):
-            idx_inside = np.where((lam_vec <= lam_up[i]) & (lam_vec>= lam_lo[i]))[0]
-            if len(idx_inside) > 1:
-                vel_mean.append(np.nanmean(vel_vec[idx_inside]))
-                vel_std.append(np.nanstd(vel_vec[idx_inside]))
-                lam_mean.append(lam_eq[i])
-
+        lam_eq = np.array(lam_eq)
         vel_mean = np.array(vel_mean)
         vel_std = np.array(vel_std)
-        lam_mean = np.array(lam_mean)
 
-        if 'minvelerr' in kwargs:
-            delta_lo = np.where(vel_std < kwargs['minvelerr'])[0]
-            if len(delta_lo) > 0:
-                vel_std[delta_lo] = kwargs['minvelerr']
+        if minvelerr is not None:
+            vel_std = np.maximum(vel_std, minvelerr)
 
-        f_mean = vel_mean/lam_mean
+        f_mean = vel_mean / lam_eq
 
         return f_mean, vel_mean, vel_std
 
-    def _resample(self,data_dict, pmin = -np.inf, pmax = np.inf, pn = 30, pspace = 'log', param = 'f', kind = 'cubic'):
+    def _resample(self,data_dict, pmin = -np.inf, pmax = np.inf, pn = 30, **kwargs):
         """resample all curves"""
 
-        data_dict = data_dict.copy()
-        if 'cmb' in data_dict.keys():
-            data_dict.pop('cmb')
+        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
 
-        # determine/check common range
-        for i in data_dict.keys():
-            dc_tmp = data_dict[i]['data_filt']
-            data = dc_tmp.data
-            pmin_tmp = np.min(data[param])
-            pmax_tmp = np.max(data[param])
+        # Determine common min/max
+        for v in data_dict.values():
+            data = v['data_filt'].data
+            pmin = max(pmin, np.min(data[kwargs.get('param', 'f')]))
+            pmax = min(pmax, np.max(data[kwargs.get('param', 'f')]))
 
-            if pmin_tmp > pmin:
-                pmin = pmin_tmp
-
-            if pmax_tmp < pmax:
-                pmax = pmax_tmp
-
-        for i in data_dict.keys():
-            dc_tmp = data_dict[i]['data_filt']
-            dc_tmp.resample(pmin,
-                             pmax,
-                             pn,
-                             pspace,
-                             param,
-                             kind,
-                             inplace=True)
-            data_dict[i]['data_filt'] = dc_tmp
+        for v in data_dict.values():
+            v['data_filt'].resample(
+                pmin=pmin,
+                pmax=pmax,
+                pn=pn,
+                inplace=True,
+                **kwargs
+            )
 
     def _compute_mean(self,data_dict):
         """compute the mean of all curves"""
 
-        data_dict = data_dict.copy()
-        if 'cmb' in data_dict.keys():
-            data_dict.pop('cmb')
+        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
 
-        ndcs = len(data_dict)  # number of dispersion curves
-        len_dcs_vec = np.zeros((ndcs, 1))  # npts of each dispersion curves
+        all_data = [v['data_filt'].data for v in data_dict.values()]
+        df = pd.concat(all_data)
+        grouped = df.groupby('f')
 
-        for i in range(ndcs):
-            npts = data_dict[i]['data_filt'].npts
-            len_dcs_vec[i] = npts
-
-        f_data = np.zeros((ndcs, int(np.max(len_dcs_vec))))
-        v_data = np.zeros((ndcs, int(np.max(len_dcs_vec))))
-
-        for i in range(ndcs):
-            data = data_dict[i]['data_filt'].data
-            f_data[i, range(len(data.lam))] = data.f
-            v_data[i, range(len(data.lam))] = data.vr
-
-        vel_mean = np.mean(v_data, axis = 0)
-        vel_std = np.std(v_data, axis = 0)
-
-        return f_data[0,:],vel_mean,vel_std
+        return grouped.mean().index.values, grouped['vr'].mean().values, grouped['vr'].std().fillna(0).values
 
     def filter_all(self):
         """filter data points at several x-locations if necessary"""
@@ -345,7 +268,7 @@ class CombineCurves:
                                                     lam_min=lam_min,
                                                     lam_max=lam_max,
                                                     a = kwargs.pop('a',4))
-        if mode == 1:
+        elif mode == 1:
             self._resample(data[key],
                            pmin = kwargs.pop('pmin',-np.inf),
                            pmax = kwargs.pop('pmax',np.inf),
@@ -353,6 +276,9 @@ class CombineCurves:
                            pspace = kwargs.pop('pspace','log'),
                            param = kwargs.pop('param','f'),
                            kind = kwargs.pop('kind','cubic'))
+            f_mean, vel_mean, vel_std = self._compute_mean(data[key])
+
+        else:
             f_mean, vel_mean, vel_std = self._compute_mean(data[key])
 
         dc_mean = DispersionCurve()
