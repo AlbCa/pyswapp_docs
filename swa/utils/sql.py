@@ -642,14 +642,6 @@ class SQL:
             self.delete_data(tn,params)
             self.to_sql(df, name = tn, if_exists = 'append', index = False)
 
-        # save a copy of the raw data that is not changed once created
-        params_raw = params.copy()
-        params_raw['procset'] = "'%s'" % 'raw'
-        df_raw = df.copy()
-        df_raw['procset'] = 'raw'
-        if self.check_data(tn, params_raw):
-            self.to_sql(df_raw, name=tn, if_exists='append', index=False)
-
     def read_curve(self, params):
         """get data from table FV for a certain wave-field transformation method"""
 

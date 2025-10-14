@@ -6,9 +6,11 @@ from matplotlib.offsetbox import AnchoredText
 from .utils import *
 from .curve import DispersionCurve
 
+import collections
 import warnings
 
 # TODO improve the class, especially the interactive filtering etc
+# TODO create app for filtering!
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -195,6 +197,9 @@ class CombineCurves:
         """filter data points at several x-locations if necessary"""
 
         data = self.data
+
+        data = collections.OrderedDict(sorted(data.items()))
+
         for key in data.keys():
             self.filter_xmid(key)
 
@@ -250,6 +255,9 @@ class CombineCurves:
         """combine curves for all xmid locations"""
 
         data = self.data
+
+        data = collections.OrderedDict(sorted(data.items()))
+
         for id,key in enumerate(data.keys()):
             self.combination(key,**kwargs)
 

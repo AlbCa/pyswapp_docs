@@ -611,6 +611,10 @@ class DataSwitcherBase(QWidget):
         plt.close('all')
 
 
+# TODO: add picking from FK, Radon
+# TODO: delete dc from database
+# TODO: add subplot with dispersion curves for xmid
+
 class DataSwitcherPick(DataSwitcherBase):
 
     def __init__(self, data, sql, plot = 'FV', use_windows=False,

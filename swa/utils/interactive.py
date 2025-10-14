@@ -431,6 +431,8 @@ class DCPickingInteractive(DraggablePoints):
 
         # boundary
         self._boundary_strength = 0.3
+        self._minVelErr = 20
+        self._boundary_min = self._minVelErr
         self._points_prior = {}
 
         # lines
@@ -542,7 +544,7 @@ class DCPickingInteractive(DraggablePoints):
             x = xs[i]
             y = ys[i][0]
             if (self._err == 'lor') and (self._offsets is not None):
-                err = lorentzian_err(self._offsets, y, x, a=self._boundary_strength)
+                err = lorentzian_err(self._offsets, y, x, a=self._boundary_strength,minvelerr= self._boundary_min)
             elif isinstance(self._err, numbers.Number):
                 err = self._err*self._boundary_strength
             else:
@@ -638,16 +640,23 @@ class DCPickingInteractive(DraggablePoints):
         """tighten or loosen boundary on mouse scroll"""
 
         if len(self._points) > 0:
-            increment = 0.1
+            increment_strength = 0.05
+            increment_min = 0.5
             if event.button == 'up':
-                self._boundary_strength += increment
-            else:
-                if self._boundary_strength - increment > 0:
-                    self._boundary_strength -= increment
 
-            #print(event.button, event.step,self._boundary_strength)
+                if self._boundary_strength <= 1:
+                    self._boundary_strength += increment_strength
+                elif self._boundary_min > 1 + increment_min:
+                    self._boundary_min -= increment_min
+            else:
+                if self._boundary_strength > increment_strength:
+                    self._boundary_strength -= increment_strength
+
+                if self._boundary_min < self._minVelErr:
+                    self._boundary_min += increment_min
 
             self._update_bounds()
+            self._update_polygons()
             self._update_plot()
 
     def _on_key(self, event):

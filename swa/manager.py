@@ -633,7 +633,8 @@ class BaseManager:
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
             dc.save(path2dc, name, format=format, **kwargs)
-            return curve_data['xmid'].unique().item()
+
+            return curve_data['xmid'].unique()[0]
 
     def _save(self, procset=None, method = None,
                    dc_mode=0, use_windows = False, **kwargs):
@@ -1150,13 +1151,13 @@ class MASW2DManager(BaseManager):
 
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
 
-    def transform_streams(self, type='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+    def transform_streams(self, method='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """
         Apply wavefield transformation to current selection or all data sets
 
         Parameters
         ----------
-        type : str, transformation method
+        method : str, transformation method
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default False, whether to apply the processing to windows
@@ -1174,9 +1175,9 @@ class MASW2DManager(BaseManager):
                 self.select_data(inplace = True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying {type} transformation to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+            print(f'Applying {method} transformation to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
                   f' ..... ', end = '')
-            self._transform(type,procset=procset, use_windows=use_windows, **kwargs)
+            self._transform(method,procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -1190,17 +1191,17 @@ class MASW2DManager(BaseManager):
 
                     self.select_data(sin, rep, inplace=True, verbose=False)
 
-                    sys.stdout.write(f'\rApplying {type} transformation to (SIN,REP) = ({sin}, {rep}) ..... ')
+                    sys.stdout.write(f'\rApplying {method} transformation to (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    self._transform(type, procset=procset, use_windows=use_windows,**kwargs)
+                    self._transform(method, procset=procset, use_windows=use_windows,**kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
         self.set_loadset(procset)
 
-    def transform(self, type='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
+    def transform(self, method='phaseshift', procset = None, apply_to = 'all', use_windows=False, **kwargs):
         """
         Apply wavefield transformation to current selection or all data sets
 
@@ -1212,7 +1213,7 @@ class MASW2DManager(BaseManager):
         use_windows : bool, default False, whether to apply the processing to windows
         """
 
-        self.transform_streams(type, procset, apply_to, use_windows, **kwargs)
+        self.transform_streams(method, procset, apply_to, use_windows, **kwargs)
 
     def extract_curves(self, procset = None, method = 'max',
                        apply_to = 'all', use_windows=False, **kwargs):
@@ -1538,7 +1539,7 @@ class MASW2DManager(BaseManager):
 
                     dc = DispersionCurve()
                     dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                    self.CC.append(dc, curve_data['xmid'].unique().item(), source=None, color=color)
+                    self.CC.append(dc, curve_data['xmid'].unique()[0], source=None, color=color)
 
     def combine(self, procset = None, method = None, dc_mode = 0,
                 use_windows=False, **kwargs):
