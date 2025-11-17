@@ -1,8 +1,4 @@
 import copy
-
-import numpy as np
-import collections
-
 from .utils.utils import *
 from .utils.interactive import *
 from .utils.sql import *
@@ -11,18 +7,18 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
                              QLabel, QComboBox)
 
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar,
+)
 from matplotlib.figure import Figure
 
-# TODO always display raw on right-side?
-# TODO add menu with all options for filtering (e.g., taper strength etc)
-# TODO delete data from db option?
-# TODO adjust visualizations?
-# TODO save picks??
-# TODO pick dc in FK plot
-# TODO load DC
+from matplotlib.widgets import PolygonSelector
+from matplotlib.path import Path
 
 class FigureSwitcher(QMainWindow):
+    """User interface to view the seismic data"""
+
     def __init__(self, figures):
         super().__init__()
         self.setWindowTitle("Data Preview Mode")
@@ -33,15 +29,21 @@ class FigureSwitcher(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        """interface design"""
+
+        # Canvas for figure
+        self.canvas = FigureCanvas(self.figures[self.current_index])
+
         # Main widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        self.toolbar = NavigationToolbar(self.canvas, self)
 
         # Layouts
-        main_layout = QVBoxLayout()
+        layout = QVBoxLayout()
         nav_layout = QHBoxLayout()
-        main_layout.addLayout(nav_layout)
-        central_widget.setLayout(main_layout)
+        layout.addLayout(nav_layout)
+        central_widget.setLayout(layout)
 
         # Navigation buttons
         self.left_btn = QPushButton()
@@ -56,14 +58,15 @@ class FigureSwitcher(QMainWindow):
         nav_layout.addWidget(self.right_btn)
         nav_layout.addStretch()
 
+        layout.addWidget(self.toolbar)
+
         self.left_btn.clicked.connect(self.show_previous_figure)
         self.right_btn.clicked.connect(self.show_next_figure)
 
-        # Canvas for figure
-        self.canvas = FigureCanvas(self.figures[self.current_index])
-        main_layout.addWidget(self.canvas)
+        layout.addWidget(self.canvas)
 
     def show_previous_figure(self):
+        """Switch to previous figure"""
         if self.current_index > 0:
             self.current_index -= 1
             self.update_figure()
@@ -72,6 +75,7 @@ class FigureSwitcher(QMainWindow):
             self.update_figure()
 
     def show_next_figure(self):
+        """Switch to next figure"""
         if self.current_index < len(self.figures) - 1:
             self.current_index += 1
             self.update_figure()
@@ -80,11 +84,13 @@ class FigureSwitcher(QMainWindow):
             self.update_figure()
 
     def update_figure(self):
+        """Update figure"""
         self.canvas.setParent(None)
         self.canvas = FigureCanvas(self.figures[self.current_index])
         self.centralWidget().layout().addWidget(self.canvas)
 
 class DualDataSwitcher(QMainWindow):
+    """User interface to display raw data and select subset of data (e.g., based on windowing) side by side"""
     def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None,
                  procsets = None, window_title = "SWA Viewer",select_plot = True, **kwargs):
         super().__init__()
@@ -100,7 +106,6 @@ class DualDataSwitcher(QMainWindow):
             DataSwitcher = DataSwitcherBase
 
         # Viewer 1: controls the index
-        # TODO: show raw?
         self.viewer1 = DataSwitcherBase(data, sql, plot = '', procset = procset, procsets = procsets,
                                         select_plot = select_plot, **kwargs)
         self.viewer1.setFixedSize(400, 600)
@@ -117,7 +122,6 @@ class DualDataSwitcher(QMainWindow):
         # Link left to right
         self.viewer1.index_changed.connect(self.viewer2.set_group)
         self.viewer1.procset_changed.connect(self.viewer2.set_procset)
-        #self.viewer1.index_pair_changed.connect(self.viewer2.set_procset)
         self.viewer1.plot_changed.connect(self.viewer2.set_plot)
 
     def clean(self):
@@ -130,6 +134,8 @@ class DualDataSwitcher(QMainWindow):
 
 
 class DataSwitcherBase(QWidget):
+    """Base user interface to manipulate seismic dataset"""
+
     index_changed = pyqtSignal(int)
     procset_changed = pyqtSignal(str)
     plot_changed = pyqtSignal(str)
@@ -211,6 +217,92 @@ class DataSwitcherBase(QWidget):
         self.init_ui()
         self.update_display()
         self.canvas.setFocus()
+
+    def init_ui(self):
+        """interface design"""
+
+        # canvas
+        if self.labels:
+            figure0 = self.create_figure(plot = 'geomShort')
+            self.canvas0 = FigureCanvas(figure0)
+
+            figure = self.create_figure()
+            self.canvas = FigureCanvas(figure)
+            self.canvas.setFocusPolicy(Qt.StrongFocus)
+            self.canvas.setFocus()
+
+        # layout
+        self.layout = QVBoxLayout(self)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setParent(self.canvas)
+
+        self.info_layout = QHBoxLayout()
+
+        label = QLabel(self.window_label)
+        label.setStyleSheet("font-size: 14px; color: gray;")
+        self.info_layout.addWidget(label)
+
+        # SIN/REP/WIN index
+        self.label = QLabel()
+        self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+        self.info_layout.addStretch()
+        self.info_layout.addWidget(self.label)
+        self.layout.addLayout(self.info_layout)
+
+        # Navigation bar
+        self.nav_layout = QHBoxLayout()
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        self.left_btn.setFixedSize(40, 40)
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        self.right_btn.setFixedSize(40, 40)
+
+        self.nav_layout.addWidget(self.left_btn)
+        self.nav_layout.addWidget(self.right_btn)
+
+        # Dropdown menu to select procset
+        if not self.is_grouped:
+            self.combo =  self.add_combobox(self.procsets, self.procset)
+            self.combo.currentTextChanged.connect(self.set_procset)
+            self.nav_layout.addWidget(self.combo)
+
+        # Dropdown menu to select plot
+        if not self.is_grouped and self.select_plot:
+            self.combo_plots = self.add_combobox(self.plots, self.plot)
+            self.combo_plots.currentTextChanged.connect(self.set_plot)
+            self.nav_layout.addWidget(self.combo_plots)
+
+        if not self.is_grouped:
+            sins = np.unique(np.asarray(self.labels)[:, 0])
+            sins = np.char.mod('%d', sins)
+
+            self.combo_select_sin = self.add_combobox(sins,
+                                                      str(self.current_index+1),
+                                                      'SIN:',
+                                                      50)
+            self.combo_select_sin.currentTextChanged.connect(self.set_index)
+            self.nav_layout.addWidget(self.combo_select_sin)
+
+        # Interaction buttons
+        if self.interaction_class:
+            self.interact_btn = QPushButton(self.btn_label)
+            self.interact_btn.setFixedSize(100, 40)
+            self.nav_layout.addWidget(self.interact_btn)
+
+        self.nav_layout.addStretch()
+        self.layout.addLayout(self.nav_layout)
+
+        self.left_btn.clicked.connect(self.show_previous_figure)
+        self.right_btn.clicked.connect(self.show_next_figure)
+
+        if self.interaction_class:
+            self.interact_btn.clicked.connect(self.interact)
+
+        self.layout.addWidget(self.canvas0)
+        self.layout.addWidget(self.toolbar)
+        self.layout.addWidget(self.canvas)
 
     # data base interaction
     def _write_data(self, data, sin, rep, procset, wid=-1):
@@ -346,10 +438,8 @@ class DataSwitcherBase(QWidget):
         return None
 
     def add_combobox(self, sets, set, label=None, size = 90):
+        """Add a combo box"""
 
-        # if label is not None:
-        #     dropdown_label = QLabel(label)
-        #     dropdown_label.setStyleSheet("font-size: 14px; color: gray;")
         combo = QComboBox()
         combo.addItems(sets)
         combo.setFixedSize(size, 40)
@@ -362,89 +452,6 @@ class DataSwitcherBase(QWidget):
 
         #return dropdown_label, combo
         return combo
-
-    def init_ui(self):
-        """interface design"""
-
-        self.layout = QVBoxLayout(self)
-
-        self.info_layout = QHBoxLayout()
-
-        label = QLabel(self.window_label)
-        label.setStyleSheet("font-size: 14px; color: gray;")
-        self.info_layout.addWidget(label)
-
-        # SIN/REP/WIN index
-        self.label = QLabel()
-        self.label.setStyleSheet("font-size: 14px; color: gray;")
-
-        self.info_layout.addStretch()
-        self.info_layout.addWidget(self.label)
-        self.layout.addLayout(self.info_layout)
-
-        # Navigation bar
-        self.nav_layout = QHBoxLayout()
-        self.left_btn = QPushButton()
-        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
-        self.left_btn.setFixedSize(40, 40)
-        self.right_btn = QPushButton()
-        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
-        self.right_btn.setFixedSize(40, 40)
-
-        self.nav_layout.addWidget(self.left_btn)
-        self.nav_layout.addWidget(self.right_btn)
-
-        # Dropdown menu to select procset
-        if not self.is_grouped:
-            self.combo =  self.add_combobox(self.procsets, self.procset)
-            self.combo.currentTextChanged.connect(self.set_procset)
-            self.nav_layout.addWidget(self.combo)
-
-        # Dropdown menu to select plot
-        if not self.is_grouped and self.select_plot:
-            self.combo_plots = self.add_combobox(self.plots, self.plot)
-            self.combo_plots.currentTextChanged.connect(self.set_plot)
-            self.nav_layout.addWidget(self.combo_plots)
-
-        if not self.is_grouped:
-            sins = np.unique(np.asarray(self.labels)[:, 0])
-            sins = np.char.mod('%d', sins)
-
-            self.combo_select_sin = self.add_combobox(sins,
-                                                      str(self.current_index+1),
-                                                      'SIN:',
-                                                      50)
-            self.combo_select_sin.currentTextChanged.connect(self.set_index)
-            self.nav_layout.addWidget(self.combo_select_sin)
-
-        # Interaction buttons
-        if self.interaction_class:
-            self.interact_btn = QPushButton(self.btn_label)
-            self.interact_btn.setFixedSize(100, 40)
-            self.nav_layout.addWidget(self.interact_btn)
-
-        self.nav_layout.addStretch()
-
-        self.layout.addLayout(self.nav_layout)
-
-        self.left_btn.clicked.connect(self.show_previous_figure)
-        self.right_btn.clicked.connect(self.show_next_figure)
-
-        if self.interaction_class:
-            self.interact_btn.clicked.connect(self.interact)
-
-        # Canvas
-        if self.labels:
-            figure0 = self.create_figure(plot = 'geomShort')
-            self.canvas0 = FigureCanvas(figure0)
-
-            figure = self.create_figure()
-            self.canvas = FigureCanvas(figure)
-            self.canvas.setFocusPolicy(Qt.StrongFocus)
-            self.canvas.setFocus()
-
-        self.layout.addWidget(self.canvas0)
-        self.layout.addWidget(self.canvas)
 
     def show_previous_figure(self):
         if not self.labels:
@@ -535,6 +542,13 @@ class DataSwitcherBase(QWidget):
         self.canvas0 = self.replace_widget(self.canvas0, figure0)
         self.canvas = self.replace_widget(self.canvas, figure)
 
+        # Reset toolbar
+        self.layout.removeWidget(self.toolbar)
+        self.toolbar.setParent(None)
+        self.toolbar = NavigationToolbar(self.canvas, self.canvas)
+        self.layout.addWidget(self.toolbar)
+
+        # Reset canvas
         self.layout.addWidget(self.canvas0)
         self.canvas.setFocusPolicy(Qt.StrongFocus)
         self.canvas.setFocus()
@@ -616,6 +630,7 @@ class DataSwitcherBase(QWidget):
 # TODO: add subplot with dispersion curves for xmid
 
 class DataSwitcherPick(DataSwitcherBase):
+    """Manual dispersion curve picking interface"""
 
     def __init__(self, data, sql, plot = 'FV', use_windows=False,
                  procset = None, procsets = None,select_plot = True, **kwargs):
@@ -626,7 +641,10 @@ class DataSwitcherPick(DataSwitcherBase):
                  procset = procset, procsets = procsets, btn_label = 'Extract Curve', select_plot = select_plot, **kwargs)
 
     def init_ui(self):
+        """interface design"""
+
         self.layout = QVBoxLayout(self)
+        self.toolbar = NavigationToolbar(self.canvas, self)
 
         self.info_layout = QHBoxLayout()
 
@@ -685,6 +703,7 @@ class DataSwitcherPick(DataSwitcherBase):
         self.nav_layout.addStretch()
 
         self.layout.addLayout(self.nav_layout)
+        self.layout.addWidget(self.toolbar)
 
         self.left_btn.clicked.connect(self.show_previous_figure)
         self.right_btn.clicked.connect(self.show_next_figure)
@@ -723,8 +742,16 @@ class DataSwitcherPick(DataSwitcherBase):
         params = {'procset': "'%s'" % self.procset, 'method': "'%s'" % self.method,
                   'sin': label[0], 'rep': label[1], 'wid': label[2]}
         curves = self._sql.read_curve(params)
+
         if not curves.empty:
-            picks = {0: {'f':curves['frequency'].values, 'v': curves['velocity'].values}}
+            picks = {
+                mode: {
+                    'f': group['frequency'].to_numpy(),
+                    'v': group['velocity'].to_numpy()
+                }
+                for mode, group in curves.groupby('dc_mode')
+            }
+
             return picks
 
         return {}
@@ -735,6 +762,12 @@ class DataSwitcherPick(DataSwitcherBase):
 
         if isinstance(type(self.interactor).picks, property):
 
+            # remove from data base
+            params = {'procset': "'%s'" % self.procset, 'method': "'%s'" % self.method,
+                      'sin': label[0], 'rep': label[1], 'wid': label[2]}
+            self._sql.delete_data('curve', params)
+
+            # add to data base
             picks = self.picks[self.current_index]
 
             for dc_mode in picks.keys():
@@ -758,6 +791,7 @@ class DataSwitcherPick(DataSwitcherBase):
 
 
 class DataSwitcherFilterSeis(DataSwitcherBase):
+    """Manual linear mute interface"""
 
     def __init__(self, data, sql, plot = '', use_windows=False,
                  procset=None, procsets=None,select_plot = True, **kwargs):
@@ -803,6 +837,7 @@ class DataSwitcherFilterSeis(DataSwitcherBase):
 
 
 class DataSwitcherFilterFK(DataSwitcherBase):
+    """Manual FK filter interface"""
 
     def __init__(self, data, sql, plot = 'FK', use_windows=False,
                  procset=None, procsets=None,select_plot = True, **kwargs):
@@ -815,7 +850,10 @@ class DataSwitcherFilterFK(DataSwitcherBase):
                  procset = procset, procsets = procsets, btn_label='Filter | Reset',select_plot = select_plot, **kwargs)
 
     def init_ui(self):
+        """interface design"""
+
         self.layout = QVBoxLayout(self)
+        self.toolbar = NavigationToolbar(self.canvas, self)
 
         self.info_layout = QHBoxLayout()
 
@@ -867,6 +905,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         self.nav_layout.addStretch()
 
         self.layout.addLayout(self.nav_layout)
+        self.layout.addWidget(self.toolbar)
 
         self.left_btn.clicked.connect(self.show_previous_figure)
         self.right_btn.clicked.connect(self.show_next_figure)
@@ -992,3 +1031,160 @@ class DataSwitcherFilterFK(DataSwitcherBase):
     def clean(self):
         for table in self._sql.get_tables():
             self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})
+
+
+class CurveFilter(QWidget):
+    """User interface to manually remove points from multiple curves"""
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+        self.keys = list(data.keys())
+        self.current_index = 0
+
+        history = []
+        for key in self.keys:
+            curves = data[key]
+            history.append([[np.ones_like(curves[curve_id]['data'].data['vr'], dtype=bool)] for curve_id in curves])
+        self.history = history
+
+        self.init_ui()
+
+    def init_ui(self):
+        """interface design"""
+
+        # UI Setup
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.ax = self.figure.add_subplot(111)
+        self.selector = None
+
+        # Buttons
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+        self.left_btn.setFixedSize(40, 40)
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+        self.right_btn.setFixedSize(40, 40)
+        self.undo_btn = QPushButton("Reset")
+        self.undo_btn.setFixedSize(80, 40)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.left_btn)
+        btn_layout.addWidget(self.right_btn)
+
+        btn_layout.addStretch()
+
+        btn_layout.addWidget(self.undo_btn)
+
+        layout = QVBoxLayout()
+        layout.addLayout(btn_layout)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas)
+        self.setLayout(layout)
+
+        # Connect signals
+        self.left_btn.clicked.connect(self.show_prev_data)
+        self.right_btn.clicked.connect(self.show_next_data)
+        self.undo_btn.clicked.connect(self.undo_filter)
+
+        self.update_display()
+
+    def current_mask(self,index):
+        """Get the most recent mask for the active curve."""
+        return self.history[self.current_index][index][-1].copy()
+
+    def update_display(self):
+        """Refresh the plot with current curve and mask."""
+        self.ax.clear()
+
+        curves = self.data[self.keys[self.current_index]]
+
+        for i in curves.keys():
+            curve = curves[i]['data']
+            x, y = curve.data['f'], curve.data['vr']
+            mask = self.current_mask(i)
+
+            if i == 0:
+                label1 = 'points to keep'
+                label2 = 'points to remove'
+            else:
+                label1 = None
+                label2 = None
+
+            curve.plot(axes = self.ax,
+                       label = label1,
+                         fontsize = 6,
+                         show_orig=False)
+
+            self.ax.scatter(x[~mask], y[~mask], color="red", label=label2)
+
+        self.ax.set_title(f"Curves {self.current_index + 1}/{len(self.data)} "
+                          f"located at x = {self.keys[self.current_index]}", fontweight = 'bold')
+        self.ax.legend()
+        self.canvas.draw_idle()
+
+        # Recreate PolygonSelector
+        if self.selector:
+            self.selector.disconnect_events()
+        self.selector = PolygonSelector(self.ax, self.onselect, useblit=True)
+
+    def onselect(self, verts):
+        """Handle polygon selection and update mask."""
+
+        curves = self.data[self.keys[self.current_index]]
+
+        for i in curves.keys():
+            curve = curves[i]['data']
+            x, y = curve.data['f'], curve.data['vr']
+
+            path = Path(verts)
+            pts = np.column_stack((x, y))
+            inside = path.contains_points(pts)
+
+            # Save current mask state (for undo)
+            current = self.current_mask(i)
+            self.history[self.current_index][i].append(current.copy())
+
+            # Apply filtering (toggle: points inside polygon are excluded)
+            new_mask = current & ~inside
+            self.history[self.current_index][i][-1] = new_mask
+
+        self.update_display()
+
+    def undo_filter(self):
+        """Undo last filtering operation for current curve."""
+
+        for curve_hist in self.history[self.current_index]:
+            if len(curve_hist) > 1:
+                curve_hist.pop()  # Remove last mask
+
+        self.update_display()
+
+    def show_next_data(self):
+        self.current_index = (self.current_index + 1) % len(self.data)
+        self.update_display()
+
+    def show_prev_data(self):
+        self.current_index = (self.current_index - 1) % len(self.data)
+        self.update_display()
+
+    def remove_points(self):
+        """Remove masked points"""
+        for j,key in enumerate(self.keys):
+
+            curves = self.data[key]
+
+            for (i,masks) in zip(curves.keys(),self.history[j]):
+
+                curve = curves[i]['data']
+
+                mask = masks[-1]
+
+                curve.markInvalid(mask=~mask)
+                curve.dropInvalid(inplace=True)
+
+                self.data[key][i]['data_filt'] = curve
+
+        return self.data

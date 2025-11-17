@@ -1,10 +1,13 @@
 """python class for manipulating an Obspy stream"""
 import numpy as np
+import sys
+
 from matplotlib.widgets import PolygonSelector
 from matplotlib.offsetbox import AnchoredText
 
 from .utils import *
 from .curve import DispersionCurve
+from .qtapps import *
 
 import collections
 import warnings
@@ -32,7 +35,6 @@ class CombineCurves:
 
             i = np.max(ids)+1
 
-        self.data[xmid][i] = {}
         self.data[xmid][i] = {'data': curve,
                                          'data_filt': curve,
                                          'label': source,
@@ -193,61 +195,37 @@ class CombineCurves:
 
         return grouped.mean().index.values, grouped['vr'].mean().values, grouped['vr'].std().fillna(0).values
 
-    def filter_all(self):
+    def filter(self):
         """filter data points at several x-locations if necessary"""
 
         data = self.data
 
         data = collections.OrderedDict(sorted(data.items()))
 
-        for key in data.keys():
-            self.filter_xmid(key)
+        #for key in data.keys():
+            #self.filter_xmid(key)
 
-    def filter_xmid(self, key):
+        self.filter_xmid(data)
+
+    def filter_xmid(self, data):
         """filter data points at one x-locations if necessary"""
 
-        data = self.data
+        #data = self.data
 
-        verts = [0]
+        app = QApplication(sys.argv)
 
-        while len(verts) > 0:
-            fig, ax = plt.subplots(figsize=(10, 6),constrained_layout = True)
-            for i in data[key].keys():
+        w = CurveFilter(data)
+        w.setWindowTitle("Dispersion curve filtering")
+        w.resize(800, 600)
+        w.show()
 
-                dc = data[key][i]['data_filt']
-                dc.plot(axes = ax,
-                             color = data[key][i]['color'],
-                             label = data[key][i]['label'],
-                             fontsize = 6,
-                             show_orig=False)
+        def handle_about_to_quit():
+            w.remove_points()
 
-            autoscale(ax,'y',margin=0.2)
-            autoscale(ax,'x',margin=0.2)
+        app.aboutToQuit.connect(handle_about_to_quit)
+        app.exec()
 
-            ax.set_title(f'Dispersion Curve Combination\nxmid = {key} m',fontweight = 'bold')
-            text = '\n'.join((
-                r'$\bf{Polygon \quad selector:}$',
-                r'1. Draw a polygon to remove points within.',
-                r'2. Close figure to update plot.',
-                r'3. To stop: draw no polygons and close figure.'))
-            at = AnchoredText(text,
-                               loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.),
-                       bbox_transform=ax.transAxes)
-            ax.add_artist(at)
-
-            selector = PolygonSelector(ax, lambda *args: None)
-            plt.show()
-
-            verts = selector.verts
-
-            if len(verts) >= 3:
-
-                for i in data[key].keys():
-
-                    dc_tmp = data[key][i]['data_filt']
-                    dc_tmp.markInvalid_by_poly(vertices=verts)
-                    dc_tmp.dropInvalid(inplace=True)
-                    data[key][i]['data_filt'] = dc_tmp
+        data = w.data
 
         self.data = data
 

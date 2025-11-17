@@ -546,24 +546,49 @@ class BaseManager:
 
         curve_data = self._sql.read_curve(params)
 
-        if not curve_data.empty:
-            dc = DispersionCurve()
-            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            func = getattr(dc, type)
-            dc = func(**kwargs)
+        if curve_data.empty:
+            return
 
-            xmids = curve_data['xmid'].unique()#item()
+        # Initialize and process the dispersion curve
+        dc_obj = DispersionCurve()
+        dc_obj.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+        func = getattr(dc_obj, type)
+        dc_obj = func(**kwargs)  # processed DispersionCurve
 
-            for xmid in xmids:
-                dc = {
-                    'xmid': xmid,
-                    'method': method,
-                    'dc_mode': params['dc_mode'],
-                    'f': dc.frequency,
-                    'v': dc.velocity,
-                    'err': dc.error}
+        # Get unique xmid values
+        xmids = curve_data['xmid'].unique()
 
-                self._sql.write_curve(dc, params['sin'], params['rep'], procset, params['wid'], xmid)
+        for xmid in xmids:
+            dc_record = {
+                'xmid': xmid,
+                'method': method,
+                'dc_mode': params['dc_mode'],
+                'f': dc_obj.frequency,
+                'v': dc_obj.velocity,
+                'err': dc_obj.error
+            }
+
+            self._sql.write_curve(
+                dc_record,
+                params['sin'],
+                params['rep'],
+                procset,
+                params['wid'],
+                xmid
+            )
+
+    def _get_stream_kwargs(self, stream):
+        """return some stream properties"""
+
+        receiver = stream.receiver
+        source = stream.source
+        offsets = receiver - source
+        stream_kwargs = {
+            'offsets': offsets,
+            'nchannels': len(receiver),
+            'dx': abs(receiver[0] - receiver[1])
+        }
+        return stream_kwargs
 
     def process_curve(self, type, procset=None, method = None,
                       dc_mode=0, use_windows = False, **kwargs):
@@ -584,43 +609,44 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
-        data = self.data
-        stream = data[sin][rep]
+        sin, rep = self.selected_ids
+        stream = self.data[sin][rep]
 
-        wids = self._sql.get_wids(sin, rep, self._loadset)
+        # Common params template
+        params_template = {
+            'procset': f"'{self._loadset}'",
+            'method': f"'{method}'",
+            'dc_mode': dc_mode,
+            'sin': sin,
+            'rep': rep
+        }
+
         if use_windows:
+            wids = self._sql.get_wids(sin, rep, self._loadset)
             for wid in wids:
+                params = params_template.copy()
+                params['wid'] = wid
 
-                params = {'procset': "'%s'" % self._loadset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
-                          'sin': sin, 'rep': rep, 'wid': wid}
+                # Avoid deepcopy if _set_data can work on slices or copies
+                tmp_stream = copy.deepcopy(stream)
+                self._set_data(tmp_stream, sin, rep, self._loadset, wid)
 
-                tmp = copy.deepcopy(stream)
-                self._set_data(tmp, sin, rep, self._loadset, wid)
-                receiver = tmp.receiver
-                source = tmp.source
-                offsets = receiver - source
-                kwargs['offsets'] = offsets
-                kwargs['nchannels'] = len(receiver)
-                kwargs['dx'] = abs(receiver[0]-receiver[1])
+                if type == 'estimate_error':
+                    stream_kwargs = self._get_stream_kwargs(tmp_stream)
+                    kwargs.update(stream_kwargs)
 
+                # Update kwargs with precomputed offsets
                 self._process_curve(type, params, method=method, procset=procset, **kwargs)
         else:
-            params = {'procset': "'%s'" % self._loadset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
-                      'sin': sin, 'rep': rep, 'wid': -1}
+            params = params_template.copy()
+            params['wid'] = -1
 
             if type == 'estimate_error':
-
-                # add offsets to kwargs
-                receiver = stream.receiver
-                source = stream.source
-                offsets = receiver - source
-                kwargs['offsets'] = offsets
-                kwargs['nchannels'] = len(receiver)
-                kwargs['dx'] = abs(receiver[0] - receiver[1])
+                stream_kwargs = self._get_stream_kwargs(stream)
+                kwargs.update(stream_kwargs)
 
             self._process_curve(type, params, method=method, procset=procset, **kwargs)
+
 
     def _save_dc(self, path2dc, name, params, format = 'csv', **kwargs):
         """save a dispersion curve"""
@@ -629,43 +655,51 @@ class BaseManager:
 
         if curve_data.empty:
             return None
-        else:
-            dc = DispersionCurve()
-            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            dc.save(path2dc, name, format=format, **kwargs)
 
-            return curve_data['xmid'].unique()[0]
+        dc = DispersionCurve()
+        dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+        dc.save(path2dc, name, format=format, **kwargs)
+
+        return curve_data['xmid'].unique()[0]
 
     def _save(self, procset=None, method = None,
                    dc_mode=0, use_windows = False, **kwargs):
+
         """save a dispersion curve for a defined source location, repetition and window id"""
 
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin, rep = self.selected_ids
 
-        dir = os.path.join(self.prjdir, f'03_proc/{procset}_{method}/Mode{int(dc_mode)}')
-        safe_makedirs(dir)
+        # Directory to save processed curves
+        dir_path = os.path.join(self.prjdir, f'03_proc/{procset}_{method}/Mode{int(dc_mode)}')
+        safe_makedirs(dir_path)
 
-        xmids = []
-        wids = self._sql.get_wids(sin, rep, procset)
-        if use_windows:
-            for wid in wids:
-                name = 'dc_sin%d-rep%d-wid%d' % (sin,rep,wid)
-                params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
-                          'sin': sin, 'rep': rep, 'wid': wid}
-                xmid = self._save_dc(dir, name, params, **kwargs)
-                if xmid is not None:
-                    xmids.append(xmid)
-        else:
-            name = 'dc_sin%d-rep%d' % (sin, rep)
-            params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': dc_mode,
-                      'sin': sin, 'rep': rep, 'wid': -1}
-            xmid = self._save_dc(dir, name, params, **kwargs)
-            if xmid is not None:
-                xmids.append(xmid)
+        # Base params template
+        params_template = {
+            'procset': f"'{procset}'",
+            'method': f"'{method}'",
+            'dc_mode': dc_mode,
+            'sin': sin,
+            'rep': rep
+        }
+
+        # Determine wids to iterate
+        wids = self._sql.get_wids(sin, rep, procset) if use_windows else [-1]
+
+        xmids = [
+            self._save_dc(
+                dir_path,
+                f"dc_sin{sin}-rep{rep}-wid{wid}" if wid != -1 else f"dc_sin{sin}-rep{rep}",
+                {**params_template, 'wid': wid},
+                **kwargs
+            )
+            for wid in wids
+        ]
+
+        # Filter out None values
+        xmids = [xmid for xmid in xmids if xmid is not None]
 
         return xmids
 
@@ -717,7 +751,7 @@ class BaseManager:
             return ax
 
     def plot_curve(self, procset=None, method='phaseshift',
-                   dc_mode=0, use_windows = False, **kwargs):
+                   use_windows = False, **kwargs):
         """
         plot a dispersion curve
 
@@ -725,7 +759,6 @@ class BaseManager:
         ----------
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curve
-        dc_mode : int, default 0, mode of propagation
         use_windows : bool, default False, whether to apply the processing to windows
 
         """
@@ -733,30 +766,33 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin,rep = self.selected_ids
 
-        wids = self._sql.get_wids(sin, rep, procset)
-        if use_windows:
-            for wid in wids:
-                params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
-                          'sin': sin, 'rep': rep, 'wid': wid}
-                curve_data = self._sql.read_curve(params)
+        params_template = {'procset': "'%s'" % procset,
+                  'method': "'%s'" % method,
+                  'sin': sin,
+                  'rep': rep}
 
-                if not curve_data.empty:
-                    dc = DispersionCurve()
-                    dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                    dc.plot(**kwargs)
-        else:
-            params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode,
-                      'sin': sin, 'rep': rep, 'wid': -1}
+        cmap = getattr(plt.cm, 'Greys')
+        color_map = cmap(np.linspace(0, 1, 10))
+
+        wids = self._sql.get_wids(sin, rep, procset) if use_windows else [-1]
+
+        for wid in wids:
+            params = params_template.copy()
+            params['wid'] = wid
+
             curve_data = self._sql.read_curve(params)
+            if curve_data.empty:
+                continue
 
-            if not curve_data.empty:
+            # handle dc_mode as array; ensure colors array indexing works
+            dc_modes = curve_data['dc_mode'].astype(int)
+            colors = color_map[dc_modes % len(color_map)]
 
-                dc = DispersionCurve()
-                dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                dc.plot(**kwargs)
+            dc = DispersionCurve()
+            dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
+            dc.plot(color=colors, edgecolor='k', **kwargs)
 
     def plot_pseudosection(self, procset=None, **kwargs):
         """
@@ -771,61 +807,62 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        method = kwargs.pop('method','phaseshift')
-        dc_mode = kwargs.pop('dc_mode',0)
-        cmap = kwargs.pop('cmap','viridis')
+        # Default kwargs
+        method = kwargs.pop('method', 'phaseshift')
+        dc_mode = kwargs.pop('dc_mode', 0)
+        cmap = kwargs.pop('cmap', 'viridis')
         show = kwargs.pop('show', True)
-        axes = kwargs.pop('axes',None)
+        axes = kwargs.pop('axes', None)
+        vmin = kwargs.pop('vmin', 200)
+        vmax = kwargs.pop('vmax', 500)
+        title = kwargs.pop('title', '')
+        outfile = kwargs.pop('outfile', None)
 
-        _, recs_all = self._sql.get_geometry(sin = '*')
-        params = {'procset': "'%s'" % procset, 'method': "'%s'" % method, 'dc_mode': "%d" % dc_mode}
+        _, recs_all = self._sql.get_geometry(sin='*')
+        params = {'procset': f"'{procset}'", 'method': f"'{method}'", 'dc_mode': f"{dc_mode}"}
         curves = self._sql.read_curve(params)
 
-        if not curves.empty:
-            xmids = curves['xmid'].unique()
-            vmin = kwargs.pop('vmin', 200)
-            vmax = kwargs.pop('vmax', 500)
-
-            fmin = kwargs.pop('fmin', curves['frequency'].min())
-            fmax = kwargs.pop('fmax', curves['frequency'].max())
-
-            title = kwargs.pop('title', '')
-            outfile = kwargs.pop('outfile', None)
-
-            if axes is None:
-                fig, ax = plt.subplots()
-            else:
-                ax = axes
-                fig = ax.figure
-
-            for xmid in xmids:
-                sub = curves[curves['xmid'] == xmid]
-                dc = DispersionCurve()
-                dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
-
-                dc.plotColumn(axes=ax,
-                              xmid=xmid,
-                              vmin=vmin, vmax=vmax,
-                              cmap=cmap, y_value='f',**kwargs)
-
-            plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
-            ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
-            ax.set_ylim([fmin, fmax])
-
-            ax.set_title(title)
-            if outfile:
-                fig.savefig(outfile)
-
-            if show:
-                plt.tight_layout()
-                plt.show()
-
-            return ax
-
-        else:
-            self.logger.warning('No dispersion curves in data base. Pseudosection not visualised')
-
+        if curves.empty:
+            self.logger.warning('No dispersion curves in database. Pseudosection not visualized.')
             return None
+
+        fmin = kwargs.pop('fmin', curves['frequency'].min())
+        fmax = kwargs.pop('fmax', curves['frequency'].max())
+
+        if axes is None:
+            fig, ax = plt.subplots()
+        else:
+            ax = axes
+            fig = ax.figure
+
+        # Use groupby to avoid repeated filtering
+        for xmid, sub in curves.groupby('xmid'):
+            dc = DispersionCurve()
+            dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
+            dc.plotColumn(
+                axes=ax,
+                xmid=xmid,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=cmap,
+                y_value='f',
+                **kwargs
+            )
+
+        plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
+        ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
+        ax.set_ylim([fmin, fmax])
+        ax.set_title(title)
+
+        if outfile:
+            fig.savefig(outfile)
+
+        if show:
+            plt.tight_layout()
+            plt.show()
+
+        return ax
+
 
     def plot(self, type='seismogram', procset = None, use_windows = False, **kwargs):
         """
@@ -845,12 +882,10 @@ class BaseManager:
         if type == 'pseudosection':
             ax = self.plot_pseudosection(procset, **kwargs)
             return ax
-
-        if type == 'curve':
-            ax = self.plot_curve(procset, **kwargs)
-            return ax
-
-        self._plot(type,procset,use_windows,**kwargs)
+        elif type == 'curve':
+            self.plot_curve(procset, **kwargs)
+        else:
+            self._plot(type,procset,use_windows,**kwargs)
 
     def get_figures(self, type = ''):
         """return plot for each data set"""
@@ -1541,6 +1576,11 @@ class MASW2DManager(BaseManager):
                     dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
                     self.CC.append(dc, curve_data['xmid'].unique()[0], source=None, color=color)
 
+    def filter_CC(self):
+        """Manually filter multiple dispersion curves"""
+
+        self.CC.filter()
+
     def combine(self, procset = None, method = None, dc_mode = 0,
                 use_windows=False, **kwargs):
         """
@@ -1555,8 +1595,11 @@ class MASW2DManager(BaseManager):
 
         """
 
+        if procset is None:
+            procset = self._procset
+
         if self.CC is None:
-            self.prepare_CC(self._procset, dc_mode, use_windows, **kwargs)
+            self.prepare_CC(procset, dc_mode, use_windows, **kwargs)
 
         starttime = time.time()
         print(f'Combining dispersion curves ..... ', end='')

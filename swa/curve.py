@@ -221,7 +221,7 @@ class DispersionCurve:
         data['invalid'] = flags
         self.data = data
 
-    def markInvalid(self, pmin=None, pmax=None, param = 'f'):
+    def markInvalid(self, pmin=None, pmax=None, param = 'f', mask = None):
         """mark invalid data points"""
 
         data = self.data.copy()
@@ -231,14 +231,18 @@ class DispersionCurve:
         min, max = pmin, pmax
 
         data['invalid'] = np.zeros_like(par, dtype=bool)
-        if (min is None) and (max is None):
-            flagidx = []
-        elif (min is not None) and (max is None):
-            flagidx = np.where(par < min)[0]
-        elif (max is not None) and (min is None):
-            flagidx = np.where(par > max)[0]
+
+        if mask is not None:
+            flagidx = mask
         else:
-            flagidx = np.where((par < min) | (par > max))[0]
+            if (min is None) and (max is None):
+                flagidx = []
+            elif (min is not None) and (max is None):
+                flagidx = np.where(par < min)[0]
+            elif (max is not None) and (min is None):
+                flagidx = np.where(par > max)[0]
+            else:
+                flagidx = np.where((par < min) | (par > max))[0]
 
         data.loc[flagidx, ['invalid']] = True
         self.data = data
