@@ -405,6 +405,7 @@ class DispersionCurve:
             fig, ax = plt.subplots(figsize=(6, 4))
         else:
             ax = axes
+            fig = ax.figure
 
         if data is None:
             data = self.data.copy()

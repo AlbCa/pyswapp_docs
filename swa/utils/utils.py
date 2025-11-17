@@ -88,28 +88,64 @@ def natural_sort(l):
     alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
     return sorted(l, key=alphanum_key)
 
+def read_filter(fin):
+    """import existing filters from file"""
 
-def read_FKfilter(fin):
-    """import existing FK filters from file"""
-    f = open(fin, 'r')
-    lines = f.readlines()
-    points_dict= {}
+    points_top = {}
+    points_bot = {}
 
-    for i,line in enumerate(lines):
+    with open(fin, 'r') as f:
+        lines = f.readlines()
 
-        line_split = line.split('\t')
+    i = 0
+    while i < len(lines):
 
-        if len(line_split) == 3:
-            key = line_split[1]
-            npoints = int(line_split[2])
-            points = np.loadtxt(fin,skiprows=i+1,max_rows=npoints,delimiter='\t')
+        parts = lines[i].strip().split('\t')
 
-            if key not in points_dict.keys():
-                points_dict[key] = [points]
-            else:
-                points_dict[key].append(points)
+        # Expect lines like: t <npoints>   or   b <npoints>
+        if parts[0] in ('t', 'b') and len(parts) == 2:
+            label = parts[0]
+            npoints = int(parts[1])
 
-    return points_dict
+            # Collect the following npoints lines
+            for j in range(i + 1, i + 1 + npoints):
+                x, y = lines[j].strip().split('\t')
+
+                if label == 't':
+                    points_top[x] = y
+                else:
+                    points_bot[x] = y
+
+            # Skip past the block
+            i += 1 + npoints
+        else:
+            i += 1
+
+    return points_top, points_bot
+
+def write_filter(fout, points, key):
+    """expot filter to file"""
+
+    if len(points) == 0:
+        return
+
+    # points is assumed to be a dict {x: y}
+    x, y = zip(*sorted(points.items()))
+
+    with open(fout, "a+") as f:
+        f.write(f"{key}\t{len(x)}\n")
+        for xi, yi in zip(x, y):
+            f.write(f"{xi:.4f}\t{yi:.4f}\n")
+
+def filter_df2dict(df):
+
+    top = df[df['key'] == 't']
+    bot = df[df['key'] == 'b']
+
+    points_top = dict(zip(top['xp'], top['yp']))
+    points_bot = dict(zip(bot['xp'], bot['yp']))
+
+    return points_top, points_bot
 
 def save2csv(outfile, freq, vel, err):
     """save dispersion curve in csv format"""

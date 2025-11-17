@@ -89,6 +89,7 @@ class FigureSwitcher(QMainWindow):
         self.canvas = FigureCanvas(self.figures[self.current_index])
         self.centralWidget().layout().addWidget(self.canvas)
 
+
 class DualDataSwitcher(QMainWindow):
     """User interface to display raw data and select subset of data (e.g., based on windowing) side by side"""
     def __init__(self, data, sql, plot = 'geom', DataSwitcher = None, procset = None,
@@ -624,10 +625,11 @@ class DataSwitcherBase(QWidget):
         event.accept()
         plt.close('all')
 
-
 # TODO: add picking from FK, Radon
 # TODO: delete dc from database
 # TODO: add subplot with dispersion curves for xmid
+# TODO: DataSwitcherFilterFK: save points to db
+# TODO: apply fk filter points to data instead of overwriting data in db??
 
 class DataSwitcherPick(DataSwitcherBase):
     """Manual dispersion curve picking interface"""
@@ -1012,6 +1014,34 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
             # filter data
             if points:
+
+                # #print(points, self.interactor.key)
+                # #self._sql.drop_table('filter')
+
+                print(points)
+
+                write_filter('../data/syn_data/testing/FKfilter.txt', points, self.interactor.key)
+
+                points_t, points_b = read_filter('../data/syn_data/testing/FKfilter.txt')
+
+                print(points_t, points_b)
+
+                # # add points to data base
+                # self._sql.write_filter(points, label[0], label[1], self.interactor.key,
+                #                        procset=self.procset, wid=label[2], method = 'FK')
+                #
+                # params = {
+                #     'procset': f"'{self.procset}'",
+                #     'wid': label[2],
+                #     'sin': label[0],
+                #     'rep': label[1]
+                # }
+                # df = self._sql.read_filter(params)
+                #
+                # pt,pb = filter_df2dict(df)
+                #
+                # print(pt,pb)
+
                 stream = self.interactor.filter()
                 self.points[self.current_index] = {}
                 self.kwargs['taper_amps'] = False
@@ -1031,6 +1061,53 @@ class DataSwitcherFilterFK(DataSwitcherBase):
     def clean(self):
         for table in self._sql.get_tables():
             self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})
+
+    # def interact(self):
+    #     """filter data based on FK plot"""
+    #     if self.interactor:
+    #         self.canvas.setFocus()
+    #
+    #         points = self.points[self.current_index]
+    #         label = self.labels[self.current_index]
+    #         self._sql.dublicate_data(self.stream, label[0], label[1], label[2])
+    #
+    #         # filter data
+    #         if points:
+    #
+    #             #print(points, self.interactor.key)
+    #             #self._sql.drop_table('filter')
+    #             self._sql.write_filter(points, label[0], label[1], self.interactor.key,
+    #                                    procset=self.procset, wid=label[2], method = 'FK')
+    #
+    #             params = {
+    #                 'procset': f"'{self.procset}'",
+    #                 'wid': label[2],
+    #                 'sin': label[0],
+    #                 'rep': label[1]
+    #             }
+    #             df = self._sql.read_filter(params)
+    #
+    #             print(df)
+    #
+    #             stream = self.interactor.filter()
+    #             self.points[self.current_index] = {}
+    #             self.kwargs['taper_amps'] = False
+    #         # reset
+    #         else:
+    #             stream = copy.deepcopy(self.stream) #self.select_data(label[0], label[1])
+    #             self._set_data(stream, label[0], label[1], 'tmp', label[2])
+    #             self.kwargs['taper_amps'] = True
+    #
+    #         # overwrite in db
+    #         self._write_data(stream, label[0], label[1], self.procset, label[2])
+    #
+    #         self.update_display()
+    #         self.canvas.setFocus()
+    #
+    # # remove dublicates
+    # def clean(self):
+    #     for table in self._sql.get_tables():
+    #         self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})
 
 
 class CurveFilter(QWidget):

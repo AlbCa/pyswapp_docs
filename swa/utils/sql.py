@@ -88,7 +88,7 @@ class SQL:
         """Drop table"""
 
         with self.get_connection() as con:
-            con.execute("""DROP TABLE IF EXISTS {name}""")
+            con.execute(f"""DROP TABLE IF EXISTS {name}""")
 
     def show_tables(self):
         """Show tables"""
@@ -298,7 +298,6 @@ class SQL:
         types = ['TEXT', 'INT', 'INT', 'INT'] + ['FLOAT'] * len(recs)
 
         # create the table if it does not exist
-        # (TODO: necessary?? or better to create the tables when initializing the db??)
         if 'amps' not in self.get_tables():
             self._create_table('amps',columns,types)
 
@@ -352,7 +351,6 @@ class SQL:
         types = ['TEXT', 'INT', 'INT', 'INT', 'INT']
 
         # create the table if it does not exist
-        # (TODO: necessary?? or better to create the tables when initializing the db??)
         if 'pid' not in self.get_tables():
             self._create_table('pid',columns,types)
 
@@ -371,7 +369,6 @@ class SQL:
             self.to_sql(df,name = 'amps', if_exists = 'append', index = False)
             self.to_sql(par_df, name='par', if_exists='append', index=False)
             self.to_sql(pid_df, name='pid', if_exists='append', index=False)
-        # TODO: better way to update??
         else:
             if procset != 'raw':
                 self.delete_data('amps',params)
@@ -661,6 +658,62 @@ class SQL:
 
             curve = self.read_sql(sql)
             return curve
+        else:
+            return pd.DataFrame()
+
+    def write_filter(self, points, sin, rep, key = 't', procset = 'proc1', wid = -1, method = 'FK'):
+        """write filter to data base"""
+
+        # %% table curve
+        # table name
+        tn = 'filter'
+
+        # table column names
+        columns = ['procset', 'wid', 'sin', 'rep','key','xp','yp','method']
+
+        # table column types
+        types = ['TEXT', 'INT', 'INT', 'INT', 'TEXT', 'FLOAT', 'FLOAT', 'TEXT']
+
+        # create the table if it does not exist
+        if tn not in self.get_tables():
+            self._create_table(tn, columns, types)
+
+        x, y = zip(*sorted(points.items()))
+
+        df = pd.DataFrame({'procset':procset,
+                            'wid': wid,
+                            'sin': sin,
+                            'rep': rep,
+                            'key': key,
+                           'xp':x,
+                           'yp':y,
+                           'method':method})
+
+        self.to_sql(df,name = tn, if_exists = 'append', index = False)
+
+    def read_filter(self, params):
+        """get data from table FV for a certain wave-field transformation method"""
+
+        if 'filter' in self.get_tables():
+
+            sql = """SELECT *
+                      FROM filter
+                      WHERE """
+
+            npar = len(params)
+            for i, key in enumerate(params.keys()):
+
+                if i < npar - 1:
+                    sql += f"{key}=={params[key]} AND "
+                else:
+                    sql += f"{key}=={params[key]}"
+
+            filter = self.read_sql(sql)
+
+            filter.sort_values(['key', 'xp'], ascending=[True, True],inplace=True)
+            filter.reset_index(inplace = True, drop = True)
+
+            return filter
         else:
             return pd.DataFrame()
 

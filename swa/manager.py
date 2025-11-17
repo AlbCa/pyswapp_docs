@@ -397,8 +397,7 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin, rep = self.selected_ids
         stream = self.current_stream
 
         wids = self._sql.get_wids(sin, rep, self._loadset)
@@ -436,8 +435,7 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin, rep = self.selected_ids
         stream = self.current_stream
 
         wids = self._sql.get_wids(sin, rep, self._loadset)
@@ -505,8 +503,7 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin, rep = self.selected_ids
         stream = self.current_stream
 
         wids = self._sql.get_wids(sin, rep, procset)
@@ -724,8 +721,7 @@ class BaseManager:
         if procset is None:
             procset = self._procset
 
-        sin = self.selected_ids[0]
-        rep = self.selected_ids[1]
+        sin, rep = self.selected_ids
         stream = self.current_stream
 
         method = kwargs.pop('method', 'phaseshift')
@@ -945,43 +941,34 @@ class BaseManager:
             DataSwitcher = DataSwitcherFilterFK
         else:
             self.logger.error(f'Interactive figure switcher does not exist for plot type "{type}"')
+            return
+
+        print('Loading the GUI ..... ', end="")
+        starttime = time.time()
 
         if use_windows:
-
-            print('Loading the GUI ..... ', end="")
-            starttime = time.time()
-            window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
+            window = DualDataSwitcher(self.data, self.path2db, plot=type,
+                                        DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,select_plot = False, **kwargs)
-            window.resize(800, 600)
-            endtime = time.time()
-            print(f'{np.round(endtime - starttime, 2)} s')
-            window.show()
 
-            def handle_about_to_quit():
-                window.clean()
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
         else:
-            print('Loading the GUI ..... ', end="")
-            starttime = time.time()
             window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,select_plot = False,**kwargs)
-            window.resize(800, 600)
-            endtime = time.time()
-            print(f'{np.round(endtime - starttime, 2)} s')
-            window.show()
 
-            def handle_about_to_quit():
-                #points = window.get_points()
-                pass
+        window.resize(800, 600)
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
+        window.show()
 
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
+        def handle_about_to_quit():
+            window.clean()
+
+        self.app.aboutToQuit.connect(handle_about_to_quit)
+        self.app.exec()
 
         plt.close('all')
 
@@ -1000,7 +987,6 @@ class BaseManager:
         if type not in ['seismogram','','TX','spectrogram','FX','spectra',
                         'FK','SFR','dispersionImage','FV', 'curve', 'DC']:
             self.logger.error(f'AttributeError: {type} does not exist.')
-            pass
 
         if type == '' or type == 'seismogram':
             type = 'TX'
@@ -1017,44 +1003,34 @@ class BaseManager:
         window_title = 'SWA - Figure Viewer'
         DataSwitcher = DataSwitcherBase
 
+        print('Loading the GUI ..... ', end="")
+        starttime = time.time()
+
         if use_windows:
-            print('Loading the GUI ..... ', end="")
-            starttime = time.time()
             window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,**kwargs)
-            window.resize(800, 600)
-            endtime = time.time()
-            print(f'{np.round(endtime - starttime, 2)} s')
-            window.show()
-
-            def handle_about_to_quit():
-                window.clean()
-
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
 
         else:
-            print('Loading the GUI ..... ', end="")
-            starttime = time.time()
             window = DataSwitcher(self.data, self.path2db, plot=type,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,**kwargs)
-            window.resize(800, 600)
-            endtime = time.time()
-            print(f'{np.round(endtime - starttime, 2)} s')
-            window.show()
 
-            def handle_about_to_quit():
-                #points = window.get_points()
-                pass
+        window.resize(800, 600)
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
+        window.show()
 
-            self.app.aboutToQuit.connect(handle_about_to_quit)
-            self.app.exec()
+        def handle_about_to_quit():
+            window.clean()
+
+        self.app.aboutToQuit.connect(handle_about_to_quit)
+        self.app.exec()
 
         plt.close('all')
+
 
 class MASW2DManager(BaseManager):
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings = None, database = 'swa.db',**kwargs):
@@ -1085,6 +1061,9 @@ class MASW2DManager(BaseManager):
         use_windows : bool, default False, whether to apply the processing to windows
         """
 
+        if procset is None:
+            procset = self._procset
+
         # Apply process to current selection only
         if apply_to == 'cur':
             if self.current_stream is None:
@@ -1110,6 +1089,9 @@ class MASW2DManager(BaseManager):
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default False, whether to apply the processing to windows
         """
+
+        if procset is None:
+            procset = self._procset
 
         if type == 'pseudosection':
             ax = self.plot_pseudosection(procset, **kwargs)
@@ -1540,10 +1522,8 @@ class MASW2DManager(BaseManager):
         color = kwargs.pop('color', 'dodgerblue')
 
         params = {'procset': "'%s'" % procset, 'dc_mode': dc_mode}
-
         if method:
             params['method'] = "'%s'" % method
-            #kwargs.pop('method')
 
         self.CC = CombineCurves()  # location where combined dcs shall be stored
 
@@ -1599,7 +1579,7 @@ class MASW2DManager(BaseManager):
             procset = self._procset
 
         if self.CC is None:
-            self.prepare_CC(procset, dc_mode, use_windows, **kwargs)
+            self.prepare_CC(procset, method = method, dc_mode = dc_mode, use_windows=use_windows, **kwargs)
 
         starttime = time.time()
         print(f'Combining dispersion curves ..... ', end='')
@@ -1657,7 +1637,6 @@ class MASW2DManager(BaseManager):
             curve_data = self._sql.read_curve(params)
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-            #dc.plot(**kwargs)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
@@ -1671,6 +1650,7 @@ class MASW2DManager(BaseManager):
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
+        pseudosection : bool, plot as pseudosection
         kwargs : arguments for the processing
 
         """

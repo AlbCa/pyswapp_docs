@@ -330,7 +330,7 @@ class FKFilterInteractive(DraggablePoints):
         taper_length = kwargs.pop('taper_length', 5)
 
         if self._points:
-            self.data.fk_filter_from_pick_ui(self._points, key = self._key, taper_length = taper_length)
+            self.data.apply_fk_filter(self._points, key = self._key, taper_length = taper_length)
 
             # reset plot
             self._points = {}

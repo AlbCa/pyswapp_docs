@@ -144,26 +144,6 @@ class SeismicStream:
         else:
             raise NotImplementedError("File format not supported.")
 
-    # def read_data_geom(self, fname,channel_nr = 1001):
-    #     """
-    #     read a shotfile and extract relevant information
-    #
-    #     Parameters
-    #     ----------
-    #     fname : str, file name
-    #     channel_nr : int, optional
-    #     """
-    #
-    #     # read and update the header of the .sg2 file
-    #     if fname.endswith('.sg2') or fname.endswith('.dat'):
-    #         self._read_sg2_geom(fname,channel_nr)
-    #     # read and update header of the .sgy file
-    #     elif fname.endswith('.sgy'):
-    #         self._read_sgy_geom(fname, channel_nr)
-    #     else:
-    #         raise NotImplementedError("File format not supported.")
-
-    # TODO check if data contains coordinate information
     def _read_sg2_geom(self, fname, channel_nr):
         """
         Read stream data with .sg2 file format with geometry information in header
@@ -1393,7 +1373,7 @@ class SeismicStream:
 
         return amps
 
-    def _fk_transform(self, taper_amps = True, **kwargs):
+    def _fk_transform(self, taper_amps = True):
         """Transformation to F-K domain"""
 
         if self._pst is None:
@@ -1447,7 +1427,7 @@ class SeismicStream:
 
         return FK_abs, theta, kw, fpos,iX,iT
 
-    def fk_filter_from_pick_ui(self, points, key = 't', **kwargs):
+    def apply_fk_filter(self, points, key = 't', **kwargs):
         """apply fk filter from picking boundaries"""
 
         if not self.FK_data:
