@@ -5,6 +5,8 @@ from matplotlib.cm import ScalarMappable,get_cmap
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 
+import os
+
 # %% helper functions for plotting
 def calculate_new_limit(fixed, dependent, limit):
     """Calculates the min/max of the dependent axis given
@@ -157,3 +159,34 @@ def plot_colorBar(ax,vmin,vmax, orientation='vertical', size=0.2, pad=None,**kwa
     cbar.set_label(label)
 
     return cbar
+
+def plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, axes = None, outfile = None):
+    """plot tomographic like approach"""
+
+    if axes is None:
+        fig, ax = plt.subplots(1, 2, figsize=(6, 2))
+    else:
+        ax = axes
+        fig = ax.figure
+
+    ax[0].plot(dphi, color='k', marker='o', markersize=5)
+    ax[0].plot(phi_model, color='r')
+    ax[0].set_xlabel("offset (m)")
+    ax[0].set_ylabel(f"phase differences (rad)")
+    ax[0].grid()
+
+    ax[1].scatter(recs_plot, phi_vel, s=15, c='darkgrey', marker='o',
+                  edgecolor='k', linewidth=0.2, zorder=-2, label=f'f = {round(f)} Hz')
+    ax[1].set_xlim([np.min(recs_plot), np.max(recs_plot)])
+    ax[1].set_ylabel(f"phase velocity (m/s)")
+    ax[1].set_xlabel("offset (m)")
+    ax[1].legend(loc='lower right', frameon=True)
+    ax[1].grid()
+
+    plt.tight_layout()
+
+    if outfile:
+        fig.savefig(outfile)
+        plt.close()
+    else:
+        plt.show()

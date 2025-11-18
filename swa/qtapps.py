@@ -5,7 +5,7 @@ from .utils.sql import *
 from .curve import DispersionCurve
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
-                             QLabel, QComboBox)
+                             QLabel, QComboBox,QMessageBox,QStyle)
 
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
@@ -442,6 +442,14 @@ class DataSwitcherBase(QWidget):
 
         return None
 
+    def show_popup(self, text):
+
+        msg = QMessageBox()
+        msg.setWindowTitle("Information")
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+
     def add_combobox(self, sets, set, label=None, size = 90):
         """Add a combo box"""
 
@@ -630,10 +638,6 @@ class DataSwitcherBase(QWidget):
         plt.close('all')
 
 # TODO: add picking from FK, Radon
-# TODO: delete dc from database
-# TODO: add subplot with dispersion curves for xmid
-# TODO: DataSwitcherFilterFK: save points to db
-# TODO: apply fk filter points to data instead of overwriting data in db??
 
 class DataSwitcherPick(DataSwitcherBase):
     """Manual dispersion curve picking interface"""
@@ -706,7 +710,15 @@ class DataSwitcherPick(DataSwitcherBase):
             self.interact_btn.setFixedSize(100, 40)
             self.nav_layout.addWidget(self.interact_btn)
 
+        self.popup_btn = QPushButton()
+        icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
+        self.popup_btn.setIcon(icon)
+        self.popup_btn.clicked.connect(self.show_popup)
+        self.popup_btn.setFixedSize(40, 40)
+
         self.nav_layout.addStretch()
+
+        self.nav_layout.addWidget(self.popup_btn)
 
         self.layout.addLayout(self.nav_layout)
         self.layout.addWidget(self.toolbar)
@@ -741,6 +753,20 @@ class DataSwitcherPick(DataSwitcherBase):
             self.write_data_to_sql()
             self.update_display()
             self.canvas.setFocus()
+
+    def show_popup(self):
+
+        text = '\n'.join((
+            r'Press any number between 0 to 9 to set dispersion curve mode index.',
+            r'Press d to delete drawn boundary.',
+            r'Press r to reset picks.',
+            r'Scroll up to tighten and down to loosen boundary.'))
+
+        msg = QMessageBox()
+        msg.setWindowTitle('Keyboard commands')
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
 
     def get_picks(self):
 
@@ -912,7 +938,15 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.interact_btn.setFixedSize(100, 40)
             self.nav_layout.addWidget(self.interact_btn)
 
+        self.popup_btn = QPushButton()
+        icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
+        self.popup_btn.setIcon(icon)
+        self.popup_btn.clicked.connect(self.show_popup)
+        self.popup_btn.setFixedSize(40, 40)
+
         self.nav_layout.addStretch()
+
+        self.nav_layout.addWidget(self.popup_btn)
 
         self.layout.addLayout(self.nav_layout)
 
@@ -1063,6 +1097,16 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.update_display()
             self.canvas.setFocus()
 
+    def show_popup(self):
+
+        text = 'Press t for top or b for bottom filter.'
+
+        msg = QMessageBox()
+        msg.setWindowTitle('Keyboard commands')
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+
     # remove dublicates
     def clean(self):
         for table in self._sql.get_tables():
@@ -1104,7 +1148,13 @@ class CurveFilter(QWidget):
         self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
         self.right_btn.setFixedSize(40, 40)
         self.undo_btn = QPushButton("Reset")
-        self.undo_btn.setFixedSize(80, 40)
+        self.undo_btn.setFixedSize(60, 40)
+
+        self.popup_btn = QPushButton()
+        icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
+        self.popup_btn.setIcon(icon)
+        self.popup_btn.clicked.connect(self.show_popup)
+        self.popup_btn.setFixedSize(60, 40)
 
         btn_layout = QHBoxLayout()
         btn_layout.addWidget(self.left_btn)
@@ -1113,6 +1163,7 @@ class CurveFilter(QWidget):
         btn_layout.addStretch()
 
         btn_layout.addWidget(self.undo_btn)
+        btn_layout.addWidget(self.popup_btn)
 
         layout = QVBoxLayout()
         layout.addLayout(btn_layout)
@@ -1205,6 +1256,19 @@ class CurveFilter(QWidget):
     def show_prev_data(self):
         self.current_index = (self.current_index - 1) % len(self.data)
         self.update_display()
+
+    def show_popup(self):
+
+        text = '\n'.join((
+            '1. Draw a polygon by left click on the figure.',
+            '2. Once a closed polygon is drawn, points within will be marked.',
+            '3. After marking all points, close App to remove marked points.'))
+
+        msg = QMessageBox()
+        msg.setWindowTitle("Information")
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
 
     def remove_points(self):
         """Remove masked points"""

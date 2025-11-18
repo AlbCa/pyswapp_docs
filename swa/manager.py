@@ -2251,34 +2251,11 @@ class Tomo2DManager(BaseManager):
                 axes = kwargs.pop('axes', None)
                 outfile = kwargs.pop('outfile', None)
 
-                if axes is None:
-                    fig, ax = plt.subplots(1,2, figsize=(6, 2))
-                else:
-                    ax = axes
-                    fig = ax.figure
-
-                ax[0].plot(dphi,color = 'k', marker = 'o', markersize=5)
-                ax[0].plot(phi_model, color = 'r')
-                ax[0].set_xlabel("offset (m)")
-                ax[0].set_ylabel(f"phase differences (rad)")
-                ax[0].grid()
-
-                ax[1].scatter(recs_plot,phi_vel, s=15, c='darkgrey', marker ='o',
-                          edgecolor='k', linewidth=0.2, zorder=-2, label = f'f = {round(f)} Hz')
-                ax[1].set_xlim([np.min(recs_plot),np.max(recs_plot)])
-                ax[1].set_ylim([10,600])
-                ax[1].set_ylabel(f"phase velocity (m/s)")
-                ax[1].set_xlabel("offset (m)")
-                ax[1].legend(loc = 'lower right', frameon=True)
-                ax[1].grid()
-
                 if outfile:
                     parent = os.path.dirname(outfile)
                     safe_makedirs(parent)
-                    fig.savefig(outfile)
-                    plt.close()
-                else:
-                    plt.show()
+
+                plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, axes, outfile)
 
         # Store curves
         xmids = recs_all['rx'].iloc[:-1].values + dx / 2
