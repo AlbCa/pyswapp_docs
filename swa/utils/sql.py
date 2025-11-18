@@ -661,7 +661,7 @@ class SQL:
         else:
             return pd.DataFrame()
 
-    def write_filter(self, points, sin, rep, key = 't', procset = 'proc1', wid = -1, method = 'FK'):
+    def write_filter(self, points, sin, rep, key = 't', procset = 'proc1', wid = -1, type = 'FK'):
         """write filter to data base"""
 
         # %% table curve
@@ -669,7 +669,7 @@ class SQL:
         tn = 'filter'
 
         # table column names
-        columns = ['procset', 'wid', 'sin', 'rep','key','xp','yp','method']
+        columns = ['procset', 'wid', 'sin', 'rep','key','xp','yp','type']
 
         # table column types
         types = ['TEXT', 'INT', 'INT', 'INT', 'TEXT', 'FLOAT', 'FLOAT', 'TEXT']
@@ -687,7 +687,7 @@ class SQL:
                             'key': key,
                            'xp':x,
                            'yp':y,
-                           'method':method})
+                           'type':type})
 
         self.to_sql(df,name = tn, if_exists = 'append', index = False)
 

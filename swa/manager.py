@@ -157,10 +157,8 @@ class BaseManager:
         print('Loading project:')
         self._sql = SQL(database=self.path2db)
 
-        #self._sql.read_setting(self.settings)
         # load settings
         self.settings = self._sql.get_table('settings')
-        # self._sql.show_tables()
 
         self.create = False
         self._read_data()
@@ -182,9 +180,6 @@ class BaseManager:
             # load processed data
             if len(prc_sets) > 1:
                 self.load_procset(prc_sets[-1])
-        # else:
-        #     print('Amplitude data loaded from "raw"')
-        #     #self.load_procset('raw')
 
         print('')
 
@@ -256,7 +251,6 @@ class BaseManager:
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
-
 
     def _get_filepath(self, sin, rep=1):
         """Return the file path corresponding to the indices sin and rep as string"""
@@ -402,13 +396,12 @@ class BaseManager:
 
         wids = self._sql.get_wids(sin, rep, self._loadset)
         if use_windows:
-            if len(wids) > 0:
-                for wid in wids:
-                    tmp = copy.deepcopy(stream)
-                    self._set_data(tmp, sin, rep, self._loadset, wid)
-                    func = getattr(tmp, type)
-                    func(**kwargs)
-                    self._write_data(tmp, sin,rep, procset, wid)
+            for wid in wids or []:
+                tmp = copy.deepcopy(stream)
+                self._set_data(tmp, sin, rep, self._loadset, wid)
+                func = getattr(tmp, type)
+                func(**kwargs)
+                self._write_data(tmp, sin,rep, procset, wid)
         else:
             func = getattr(stream, type)
             func(**kwargs)
@@ -429,6 +422,97 @@ class BaseManager:
         """
         self._preprocess(type, procset, use_windows, **kwargs)
 
+    def read_filter(self, ftype, procset=None, use_windows=False):
+        """Read manual filter from database."""
+
+        procset = procset or self._procset
+
+        if ftype not in ("FK", "TX"):
+            self.logger.error("Filter type not implemented.")
+            return None, None
+
+        sin, rep = self.selected_ids
+
+        params_template = {
+            "procset": f"'{procset}'",
+            "sin": sin,
+            "rep": rep,
+            "type": f"'{ftype}'",
+        }
+
+        wids = self._sql.get_wids(sin, rep, procset)
+
+        points_top = []
+        points_bot = []
+
+        if use_windows:
+            for wid in wids or []:
+                params = {**params_template, "wid": wid}
+                df = self._sql.read_filter(params)
+                pt, pb = filter_df2dict(df)
+                points_top.append(pt)
+                points_bot.append(pb)
+        else:
+            params = {**params_template, "wid": -1}
+            df = self._sql.read_filter(params)
+
+            print(df)
+
+            points_top, points_bot = filter_df2dict(df)
+
+        return points_top, points_bot
+
+    def apply_filter(self,ftype, points_top = None, points_bot = None,procset=None, use_windows=False, **kwargs):
+        """Apply manual filter from database."""
+
+        procset = procset or self._procset
+
+        if ftype not in ("FK", "TX"):
+            self.logger.error("Filter type not implemented.")
+            return None, None
+
+        # if points_top is None or points_bot is None:
+        #     points_top, points_bot = self.read_filter(ftype, procset,use_windows)
+
+        sin, rep = self.selected_ids
+        stream = self.current_stream
+
+        wids = self._sql.get_wids(sin, rep, self._loadset) or []
+
+        if use_windows:
+            for i, wid in enumerate(wids):
+                tmp_stream = copy.deepcopy(stream)
+                self._set_data(tmp_stream, sin, rep, self._loadset, wid)
+
+                if ftype == "FK":
+                    # Validate list lengths
+                    try:
+                        pt = points_top[i]
+                        pb = points_bot[i]
+                    except IndexError:
+                        self.logger.error(
+                            f"Mismatch between number of windows ({len(wids)}) "
+                            f"and provided filter point sets."
+                        )
+                        continue
+
+                    for pts, key in zip([pt, pb], ["t", "b"]):
+                        tmp_stream.apply_fk_filter(pts, key, **kwargs)
+                else:
+                    raise NotImplementedError
+
+                self._write_data(tmp_stream, sin, rep, procset, wid)
+
+        else:
+            if ftype == "FK":
+                for pts, key in zip([points_top, points_bot], ["t", "b"]):
+                    stream.apply_fk_filter(pts, key, **kwargs)
+            else:
+                raise NotImplementedError
+
+            self.data[sin][rep] = stream
+            self._write_data(stream, sin, rep, procset, wid=-1)
+
     def _transform(self, method='phaseshift', procset=None, use_windows = False, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
 
@@ -441,12 +525,11 @@ class BaseManager:
         wids = self._sql.get_wids(sin, rep, self._loadset)
 
         if use_windows:
-            if len(wids) > 0:
-                for wid in wids:
-                    tmp = copy.deepcopy(stream)
-                    self._set_data(tmp, sin, rep, self._loadset, wid)
-                    tmp.transform(method=method, **kwargs)
-                    self._write_FV(tmp,  sin, rep, procset, wid)
+            for wid in wids or []:
+                tmp = copy.deepcopy(stream)
+                self._set_data(tmp, sin, rep, self._loadset, wid)
+                tmp.transform(method=method, **kwargs)
+                self._write_FV(tmp,  sin, rep, procset, wid)
         else:
             stream.transform(method=method, **kwargs)
             self.data[sin][rep] = stream
@@ -508,13 +591,14 @@ class BaseManager:
 
         wids = self._sql.get_wids(sin, rep, procset)
         if use_windows:
-            for wid in wids:
+            for wid in wids or []:
                 tmp = copy.deepcopy(stream)
                 self._set_data(tmp, sin, rep, procset, wid)
                 self._set_FV(tmp, sin, rep, self._procset, wid, method=method)
                 self._extract_dc(tmp, sin = sin, rep = rep, wid = wid, procset=procset,
                               method = method, **kwargs)
         else:
+            stream = copy.deepcopy(stream)
             self._set_data(stream, sin, rep, procset)
             self._set_FV(stream, sin, rep, procset=procset, method=method)
             self._extract_dc(stream,  sin=sin, rep=rep, wid=-1, procset=procset,
@@ -620,11 +704,10 @@ class BaseManager:
 
         if use_windows:
             wids = self._sql.get_wids(sin, rep, self._loadset)
-            for wid in wids:
+            for wid in wids or []:
                 params = params_template.copy()
                 params['wid'] = wid
 
-                # Avoid deepcopy if _set_data can work on slices or copies
                 tmp_stream = copy.deepcopy(stream)
                 self._set_data(tmp_stream, sin, rep, self._loadset, wid)
 
@@ -632,7 +715,6 @@ class BaseManager:
                     stream_kwargs = self._get_stream_kwargs(tmp_stream)
                     kwargs.update(stream_kwargs)
 
-                # Update kwargs with precomputed offsets
                 self._process_curve(type, params, method=method, procset=procset, **kwargs)
         else:
             params = params_template.copy()
@@ -643,7 +725,6 @@ class BaseManager:
                 kwargs.update(stream_kwargs)
 
             self._process_curve(type, params, method=method, procset=procset, **kwargs)
-
 
     def _save_dc(self, path2dc, name, params, format = 'csv', **kwargs):
         """save a dispersion curve"""
@@ -723,6 +804,7 @@ class BaseManager:
 
         sin, rep = self.selected_ids
         stream = self.current_stream
+        stream = copy.deepcopy(stream)
 
         method = kwargs.pop('method', 'phaseshift')
         if type in ['dispersionImage', 'dispersionImageComposite']:
@@ -732,7 +814,7 @@ class BaseManager:
         window_axes = []
 
         if use_windows:
-            for wid in wids:
+            for wid in wids or []:
                 tmp = copy.deepcopy(stream)
                 self._set_data(tmp, sin, rep, procset, wid)
 
@@ -743,6 +825,7 @@ class BaseManager:
                 window_axes.append(fig)
             return window_axes, wids
         else:
+            self._set_data(stream, sin, rep, procset, -1)
             ax = stream.plot(type, show=True, **kwargs)
             return ax
 
@@ -1530,11 +1613,12 @@ class MASW2DManager(BaseManager):
         for sin in self.data.keys():
             for rep in self.data[sin].keys():
 
+                params['sin'] = sin
+                params['rep'] = rep
+
                 wids = self._sql.get_wids(sin, rep, procset)
                 if use_windows:
-                    for wid in wids:
-                        params['sin'] = sin
-                        params['rep'] = rep
+                    for wid in wids or []:
                         params['wid'] = wid
 
                         curve_data = self._sql.read_curve(params)
@@ -1546,8 +1630,6 @@ class MASW2DManager(BaseManager):
                             self.CC.append(dc, xmid, source=None, color=color)
 
                 else:
-                    params['sin'] = sin
-                    params['rep'] = rep
                     params['wid'] = -1
 
                     curve_data = self._sql.read_curve(params)

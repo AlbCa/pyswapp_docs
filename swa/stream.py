@@ -4,6 +4,7 @@ import os.path
 from collections import OrderedDict
 import numbers
 
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal, special
 from scipy import interpolate
@@ -1036,9 +1037,6 @@ class SeismicStream:
             max = kwargs.setdefault('max', np.inf)
             self._filter_freq(type,min,max)
         elif by == 'FK':
-            # if 'manual' in kwargs:
-            #     self._fk_filter_from_pick(**kwargs)
-            # else:
             self._fk_filter_from_file(**kwargs)
         elif by == 'LMO':
             vel = kwargs.setdefault('vel', None)
@@ -1478,111 +1476,16 @@ class SeismicStream:
         """Reset FK filter"""
         self._pst = self._st.copy()
 
-    def _fk_filter_from_file(self, fname=None, show=False, **kwargs):
+    def _fk_filter_from_file(self, fname=None, **kwargs):
         """apply the fk filter based on a file containing the bounds"""
 
-        raise NotImplementedError('Not tested in new version')
+        if os.path.isfile(fname):
+            points_top, points_bot = read_filter(fname)
 
-        # # transformation
-        # if not self.FK_data:
-        #     FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
-        # else:
-        #     FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
-        #
-        # npoints = FK_abs.shape[1]
-        #
-        # fpos = freq[:npoints // 2]
-        # df = fpos[1] - fpos[0]
-        # fmin = np.argmin(np.abs(fpos - self.fmin))
-        # fmax = np.argmin(np.abs(fpos - self.fmax))
-        #
-        # # kwpos = np.linspace(0, np.max(kw), npoints)
-        # kwpos = np.linspace(0, 2 * np.max(kw), npoints)
-        # #kmax = np.max(kwpos[:npoints // 2])
-        #
-        # if self.kmax is None:
-        #     self.kmax = np.max(kwpos[:npoints // 2])
-        #
-        # kmin = np.argmin(np.abs(kwpos - self.kmin))
-        # kmax = np.argmin(np.abs(kwpos - self.kmax))
-        #
-        # # tapering function
-        # taper_func = getattr(signal.windows, 'hann')
-        # taper_len = int(kwargs.pop('taper_length', 5) // df)
-        # taper_win = taper_func(2 * taper_len)
-        #
-        # # plt.figure();plt.imshow(np.flipud(FK_abs),extent = (kw[0], 2*kw[255], freq[0], freq[255]), aspect='auto')
-        #
-        # FK_abs_filt = FK_abs.copy()
-        #
-        # # import previously created filter
-        # if fname is not None:
-        #     if os.path.isfile(fname):
-        #         points_dict = read_FKfilter(fname)
-        #
-        #         for key, point_list in points_dict.items():
-        #
-        #             for points in point_list:
-        #                 if len(points) > 0:
-        #
-        #                     fp = points[:, 1]  # frequency
-        #                     kp = points[:, 0]  # wavenumber
-        #
-        #                     f = interpolate.interp1d(fp, kp, fill_value="extrapolate")
-        #                     kpp = f(fpos)
-        #
-        #                     if key == 't':
-        #                         window = np.zeros_like(FK_abs_filt[0, :])
-        #                         for j in range(len(fpos)):
-        #                             k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-        #                             window[k_min_tmp:] = 1
-        #                             if k_min_tmp > taper_len - 1:
-        #                                 window[k_min_tmp - taper_len:k_min_tmp] = taper_win[:taper_len]
-        #                             else:
-        #                                 window[:k_min_tmp] = taper_win[taper_len - k_min_tmp:taper_len]
-        #
-        #                             FK_abs_filt[j, :] *= window
-        #                             window *= 0
-        #
-        #                     elif key == 'b':
-        #                         window = np.ones_like(FK_abs_filt[0, :])
-        #                         for j in range(len(fpos)):
-        #                             k_min_tmp = np.argmin(abs(kwpos - kpp[j]))
-        #                             window[k_min_tmp:] = 0
-        #                             if k_min_tmp < len(kwpos) - taper_len:
-        #                                 window[k_min_tmp:taper_len + k_min_tmp] = taper_win[taper_len:]
-        #                             else:
-        #                                 window[k_min_tmp:] = taper_win[taper_len:taper_len + len(kwpos) - k_min_tmp]
-        #
-        #                             FK_abs_filt[j, :] *= window
-        #                             window = np.ones_like(FK_abs_filt[0, :])
-        #                     else:
-        #                         raise ValueError('Incorrect key in file. '
-        #                                          'Use either "t" for top or "b" for bottom mute.')
-        #
-        #         # back transformation
-        #         FK_filt = FK_abs_filt * np.exp(1j * theta)
-        #         FK_filt = np.fft.ifftshift(FK_filt, axes=1)
-        #         FK_filt[:, :npoints // 2] = 0
-        #         amps = self._inverse_fk_transform(FK_filt, iT, iX)
-        #         self._amps2st(amps)
-        #
-        #         if show:
-        #             fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-        #             self._plotFK(FK_abs[fmin:fmax, kmin:kmax], axes=ax[0], **kwargs)
-        #             self._plotFK(FK_abs_filt[fmin:fmax, kmin:kmax], axes=ax[1], **kwargs)
-        #             ax[0].set_title('Raw data', fontweight='bold')
-        #             ax[1].set_title('Post fk filter', fontweight='bold')
-        #             plt.tight_layout()
-        #             plt.show()
-        #
-        #     else:
-        #         warn_msg = "Incorrect filename provided for FK filtering. No filtering applied."
-        #         self.logger.warning(warn_msg)
-        # else:
-        #     warn_msg = "No file provided with FK filter. No filtering applied."
-        #     self.logger.warning(warn_msg)
-
+            for points, key in zip([points_top,points_bot],['t','b']):
+                self.apply_fk_filter(points,key,**kwargs)
+        else:
+            self.logger.error(f"File {fname} not found. No FK filter applied to data")
 
     def transform(self, method = 'phaseshift', **kwargs):
         """Apply the wave field transformation"""

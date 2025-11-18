@@ -88,6 +88,7 @@ def natural_sort(l):
     alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
     return sorted(l, key=alphanum_key)
 
+# TODO add data index (e.g., sin, rep, wid)
 def read_filter(fin):
     """import existing filters from file"""
 
@@ -111,6 +112,9 @@ def read_filter(fin):
             for j in range(i + 1, i + 1 + npoints):
                 x, y = lines[j].strip().split('\t')
 
+                x = float(x)
+                y = float(y)
+
                 if label == 't':
                     points_top[x] = y
                 else:
@@ -124,7 +128,7 @@ def read_filter(fin):
     return points_top, points_bot
 
 def write_filter(fout, points, key):
-    """expot filter to file"""
+    """export filter to file"""
 
     if len(points) == 0:
         return
@@ -132,12 +136,15 @@ def write_filter(fout, points, key):
     # points is assumed to be a dict {x: y}
     x, y = zip(*sorted(points.items()))
 
-    with open(fout, "a+") as f:
+    with open(fout, "w") as f:
         f.write(f"{key}\t{len(x)}\n")
         for xi, yi in zip(x, y):
             f.write(f"{xi:.4f}\t{yi:.4f}\n")
 
 def filter_df2dict(df):
+
+    if df.empty:
+        return {},{}
 
     top = df[df['key'] == 't']
     bot = df[df['key'] == 'b']
