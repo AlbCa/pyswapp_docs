@@ -1521,7 +1521,7 @@ class SeismicStream:
             # plane steering vector
             return np.exp(1j * kx * sign)
 
-    def _phaseshift(self, taper_amps = True):
+    def _phaseshift(self):
         """Phase-shift transformation method after Park et al.(1998)."""
 
         self.dispersive_energy = None
@@ -1538,10 +1538,7 @@ class SeismicStream:
         else:
             st = self._pst.copy()
 
-        if taper_amps:
-            amps = self._apply_taper(st=st, inplace=False)
-        else:
-            amps = self._amps(st=st)
+        amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -1591,35 +1588,22 @@ class SeismicStream:
         self.velocity = vels
         self.wavenumber = ks
 
-    def _rfest(self, u, iX):
+    def _rfest(self, u):
         """spatiospectral correlation matrix (Zywicki, 1999)"""
 
-        _, iF, nblocks = u.shape
+        # unpack dimensions
+        iX, iF, nblocks = u.shape
 
-        # weighting matrix
+        # weights: shape (iX, iF)
         weights = 1 / np.abs(np.mean(u, axis=-1))
-        for i in range(iF):
-            wi = weights[:, i]
-            for b in range(nblocks):
-                u[:, i, b] *= wi
 
-        # Calculate spatiospectral correlation matrix
-        R = np.empty((iX, iX, iF)).astype(complex)
-        Rsum = np.zeros((iX, iX)).astype(complex)
-        tslice_n = np.zeros((iX, 1)).astype(complex)
-        tslice_h = np.transpose(np.conjugate(tslice_n))
-        for i in range(iF):
-            Rsum[:, :] = 0
-            for j in range(nblocks):
-                tslice_n[:, 0] = u[:, i, j]
-                tslice_h[0, :] = np.conjugate(tslice_n)[:, 0]
-                Rsum += np.dot(tslice_n, tslice_h)
-            Rsum /= nblocks
-            R[:, :, i] = Rsum[:]
+        # broadcast weights across blocks
+        u_weighted = u * weights[..., None]
 
+        R = np.einsum("ifk,jfk->ijf", u_weighted, u_weighted.conj()) / nblocks
         return R
 
-    def _fdbf(self, steering = 'cylindrical', taper_amps = True):
+    def _fdbf(self, steering = 'cylindrical'):
         """frequency-domain beamforming (Zywicki, 1999)"""
 
         self.dispersive_energy = None
@@ -1639,10 +1623,7 @@ class SeismicStream:
         else:
             st = self._pst.copy()
 
-        if taper_amps:
-            amps = self._apply_taper(st=st, inplace=False)
-        else:
-            amps = self._amps(st=st)
+        amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -1674,24 +1655,22 @@ class SeismicStream:
         u = np.fft.fft(amps, axis=1)
 
         # Calculate the spatiospectral correlation matrix
-        sscm = self._rfest(u, iX)
+        sscm = self._rfest(u)
         sscm = sscm[:,:,fids]
 
         # weighting
-        offsets_n = offsets.reshape(iX, 1)
-        offsets_h = np.transpose(np.conjugate(offsets_n))
-        w = np.dot(offsets_n, offsets_h)
+        offsets_n = offsets[:, None]
+        w = offsets_n @ offsets_n.T
 
         ks = np.zeros_like(vels)
         V = np.zeros((len(vels), len(freq))).astype(complex)
         for i, f in enumerate(freq):
-            romega = sscm[:, :, i]*w
+            R_f = sscm[:, :, i]*w
             for j, vel in enumerate(vels):
                 ktrial = wavenumber(f,vel)
                 kx = ktrial*offsets
                 steer = self._steering_vector(kx,steering)
-                _V = np.dot(np.dot(np.transpose(np.conjugate(steer)),romega), steer)
-                V[j, i] = _V
+                V[j, i] = (steer.conjugate().T @ R_f @ steer)
                 ks[j] = ktrial
 
         V = V / len(offsets)  # normalization by trace number (suggested by Olafsdottir,2018)
@@ -1820,7 +1799,7 @@ class SeismicStream:
             warn_msg = 'No dispersion curve extracted.'
             self.logger.warning(warn_msg)
 
-    def compute_phasediffs(self, taper_amps = False):
+    def compute_phasediffs(self):
         """compute phase differences between adjacent receivers for one shot file"""
 
         receiver = self.receiver
@@ -1831,13 +1810,13 @@ class SeismicStream:
         else:
             st = self._pst.copy()
 
-        if taper_amps:
-            amps = self._apply_taper(st=st, inplace=False)
-        else:
-            amps = self._amps(st=st)
+        # if taper_amps:
+        #     amps = self._apply_taper(st=st, inplace=False)
+        # else:
+        amps = self._amps(st=st)
 
-        if self.pad:
-            amps,_,_ = self._zero_padding(amps)
+        # if self.pad:
+        #     amps,_,_ = self._zero_padding(amps)
 
         if source > receiver[-1]:
             amps = np.flipud(amps)
