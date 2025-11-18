@@ -215,6 +215,10 @@ class DataSwitcherBase(QWidget):
 
         self.kwargs = kwargs
 
+        self.taper = {}
+        for i in range(len(self.labels)):
+            self.taper[i] = {'taper_amps': True}
+
         self.init_ui()
         self.update_display()
         self.canvas.setFocus()
@@ -301,8 +305,8 @@ class DataSwitcherBase(QWidget):
         if self.interaction_class:
             self.interact_btn.clicked.connect(self.interact)
 
-        self.layout.addWidget(self.canvas0)
         self.layout.addWidget(self.toolbar)
+        self.layout.addWidget(self.canvas0)
         self.layout.addWidget(self.canvas)
 
     # data base interaction
@@ -855,7 +859,11 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         """interface design"""
 
         self.layout = QVBoxLayout(self)
-        self.toolbar = NavigationToolbar(self.canvas, self)
+
+        self.toolbar1 = NavigationToolbar(self.canvas, self)
+        self.toolbar2 = NavigationToolbar(self.canvas1, self)
+
+        self.toolbar_layout = QHBoxLayout()
 
         self.info_layout = QHBoxLayout()
 
@@ -907,7 +915,10 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         self.nav_layout.addStretch()
 
         self.layout.addLayout(self.nav_layout)
-        self.layout.addWidget(self.toolbar)
+
+        self.toolbar_layout.addWidget(self.toolbar1)
+        self.toolbar_layout.addWidget(self.toolbar2)
+        self.layout.addLayout(self.toolbar_layout)
 
         self.left_btn.clicked.connect(self.show_previous_figure)
         self.right_btn.clicked.connect(self.show_next_figure)
@@ -979,6 +990,20 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         self.canvas1 = self.replace_widget(self.canvas1, figure1)
         self.canvas = self.replace_widget(self.canvas, figure)
 
+        # Reset toolbar
+        self.layout.removeWidget(self.toolbar1)
+        self.toolbar1.setParent(None)
+        self.toolbar1 = NavigationToolbar(self.canvas, self.canvas)
+
+        self.layout.removeWidget(self.toolbar2)
+        self.toolbar2.setParent(None)
+        self.toolbar2 = NavigationToolbar(self.canvas1, self.canvas1)
+
+        self.toolbar_layout = QHBoxLayout()
+        self.toolbar_layout.addWidget(self.toolbar1)
+        self.toolbar_layout.addWidget(self.toolbar2)
+        self.layout.addLayout(self.toolbar_layout)
+
         self.canvas.setFocusPolicy(Qt.StrongFocus)
         self.canvas.setFocus()
         self.canvas.setEnabled(self.data_exists)
@@ -997,7 +1022,11 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             points = self.points.get(self.current_index, {})
             picks = self.picks.get(self.current_index, {})
 
-            self.interactor = self.interaction_class(ax, points=points, data = self.stream, picks = picks, **self.kwargs)
+            self.interactor = self.interaction_class(ax,
+                                                     points=points,
+                                                     data = self.stream,
+                                                     picks = picks,
+                                                     **self.kwargs, **self.taper[self.current_index])
 
             #if self.interactor.picks:
             self.points[self.current_index] = self.interactor.points
@@ -1020,13 +1049,13 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
                 stream = self.interactor.filter()
                 self.points[self.current_index] = {}
-                self.kwargs['taper_amps'] = False
+                self.taper[self.current_index]['taper_amps'] = False
 
             # reset
             else:
                 stream = copy.deepcopy(self.stream)
                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
-                self.kwargs['taper_amps'] = True
+                self.taper[self.current_index]['taper_amps'] = True
 
             # overwrite in db
             self._write_data(stream, label[0], label[1], self.procset, label[2])

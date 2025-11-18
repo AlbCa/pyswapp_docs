@@ -2042,8 +2042,6 @@ class Tomo2DManager(BaseManager):
         if procset != self._procset:
             self.set_new_procset(procset)
 
-        taper_amps = kwargs.pop('taper_amps', True)
-
         # compute the phase differences
         starttime = time.time()
         for sin in self.data.keys():
@@ -2067,7 +2065,7 @@ class Tomo2DManager(BaseManager):
                     tmp = copy.deepcopy(current_stream)
                     self._set_data(tmp, sin, rep, procset, wid)
 
-                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs(taper_amps = taper_amps)
+                    cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs()
                     cur_rec = tmp.receiver
 
                     cur_sht_geom, cur_rec_geom = self._sql.get_geometry(sin, rep)
@@ -2129,158 +2127,176 @@ class Tomo2DManager(BaseManager):
             procset = self._procset
 
         np.set_printoptions(threshold=sys.maxsize)
-
         starttime = time.time()
         print(f'Running tomographic-like approach ..... ', end='')
 
-        # compute the phase differences if the table does not exist
+        # ensure phasediff table exists
         if 'pd' not in self._sql.get_tables():
             self.compute_phasediff(procset)
 
-        # obtain the frequencies from the database
+        # frequencies
         sql = (f"""SELECT DISTINCT frequency
-                 FROM pd
-                 WHERE procset=='%s'AND sin==%d AND calc=='%s'"""
+                   FROM pd
+                   WHERE procset=='%s' AND sin==%d AND calc=='%s'"""
                % (procset, 1, 'NONE'))
+
         freq = self._sql.read_sql(sql)['frequency'].values
 
-        # obtain the shot parameters
+        # geometry
         _, recs_all = self._sql.get_geometry(sin='*')
         dx = np.mean(np.diff(recs_all['rx'].iloc[:-1].values))
         nrec = len(recs_all)
         nshot = len(self.data)
 
-        # set up the system of equations
         phi_vel_all = np.zeros((nrec - 1, len(freq)))
+
+        # MAIN FREQUENCY LOOP
         for jj, f in enumerate(freq):
 
-            A = np.zeros((2 * nshot * nrec - 1, nrec - 1))  # design matrix
-            dphi = np.zeros((2 * nshot * nrec - 1,1))  # phase vector
-            error = np.zeros((2 * nshot * nrec - 1,1))  # error vector
-            iii = 0
+            # allocate generously; shrink later
+            maxrows = 2 * nshot * (nrec - 1)
+            A = np.zeros((maxrows, nrec - 1))
+            dphi = np.zeros((maxrows,))
+            variance = np.zeros((maxrows,))
 
+            iii = 0  # row counter
+
+            # loop over shots
             for sin in self.data.keys():
 
-                _, _, _, sht = self._sql.read_data(sin,1, procset = 'raw')
-                _,recs = self._sql.get_geometry(sin=sin)
+                _, _, _, sht = self._sql.read_data(sin, 1, procset='raw')
+                _, recs = self._sql.get_geometry(sin=sin)
 
-                # %% process forward shots
-                offset = recs_all['rx'].iloc[:-1].values - sht['sx'].item()  # signed offset vector
-                oids = np.argwhere(((offset >= min_offset) &
-                                    (offset <= max_offset)) &
-                                   ((recs_all['rx'].iloc[:-1].values >= recs['rx'].iloc[:-1].min()) &
-                                    (recs_all['rx'].iloc[:-1].values <= recs['rx'].iloc[:-1].max())))[:, 0]
+                shot_x = sht['sx'].item()
+                rx_all = recs_all['rx'].iloc[:-1].values
 
-                columns = ['pd%d'%i for i in range(1,len(offset)+1)]
+                offset = rx_all - shot_x
+
+                columns = ['pd%d' % i for i in range(1, len(offset) + 1)]
 
                 if len(self.data[sin]) > 1:
-                    pd_mean = self._sql.read_pd(sin, procset, calc = 'AVG', columns=columns)
-                    pd_std = self._sql.read_pd(sin, procset, calc = 'STDEV', columns=columns)
+                    pd_mean = self._sql.read_pd(sin, procset, calc='AVG', columns=columns)
+                    pd_std = self._sql.read_pd(sin, procset, calc='STDEV', columns=columns)
                 else:
-                    pd_mean = self._sql.read_pd(sin, procset, calc = 'NONE', columns=columns)
-                    pd_std = pd.DataFrame()
+                    pd_mean = self._sql.read_pd(sin, procset, calc='NONE', columns=columns)
+                    pd_std = None
 
-                # fill A, dphi, error
-                for ii in oids:
-                    if pd_mean.iloc[jj, ii] < 0:
-                        iii += 1
-                        A[iii, ii] = dx
-                        dphi[iii] = pd_mean.iloc[jj, ii]
-                        if rel_err is not None:
-                            abs_err = rel_err * pd_mean.iloc[jj, ii]
-                            error[iii] = abs_err
-                        elif not pd_std.empty:
-                            error[iii] = pd_std.iloc[jj, ii]**2
-                        else:
-                            error[iii] = 1
+                # FORWARD (offset > 0)
+                fwd_mask = (
+                        (offset >= min_offset) &
+                        (offset <= max_offset) &
+                        (rx_all >= recs['rx'].iloc[:-1].min()) &
+                        (rx_all <= recs['rx'].iloc[:-1].max()) &
+                        (pd_mean.iloc[jj, :] < 0)
+                )
+                fwd_idx = np.where(fwd_mask)[0]
 
-                # %% process reverse shots
-                oids = np.argwhere(((offset >= -max_offset) & (offset <= -min_offset)) &
-                                   ((recs_all['rx'].iloc[:-1].values >= recs['rx'].iloc[:-1].min()) &
-                                    (recs_all['rx'].iloc[:-1].values <= recs['rx'].iloc[:-1].max())))[:, 0]
+                for ii in fwd_idx:
+                    A[iii, ii] = dx
+                    dphi[iii] = pd_mean.iloc[jj, ii]
 
-                # fill A, dphi, error
-                for ii in oids:
-                    if pd_mean.iloc[jj, ii] > 0:
-                        iii += 1
-                        A[iii, ii] = -dx
-                        dphi[iii] = pd_mean.iloc[jj, ii]
-                        if rel_err is not None:
-                            abs_err = rel_err * pd_mean.iloc[jj, ii]
-                            error[iii] = abs_err
-                        elif not pd_std.empty:
-                            error[iii] = pd_std.iloc[jj, ii]**2
-                        else:
-                            error[iii] = 1
+                    # variance
+                    if rel_err is not None:
+                        variance[iii] = (rel_err * dphi[iii]) ** 2
+                    elif pd_std is not None:
+                        variance[iii] = pd_std.iloc[jj, ii] ** 2
+                    else:
+                        variance[iii] = 1.0
 
-            # solve equations
-            A = A[~np.all(A == 0, axis=1)]
-            dphi = dphi[~np.all(dphi == 0, axis=1)].reshape((-1,))
-            error = error[~np.all(error == 0, axis=1)].reshape((-1,))
+                    iii += 1
 
-            if rel_err is not None:
-                error = np.ones_like(error)*np.var(error)
+                # REVERSE (offset < 0)
+                rev_mask = (
+                        (offset <= -min_offset) &
+                        (offset >= -max_offset) &
+                        (rx_all >= recs['rx'].iloc[:-1].min()) &
+                        (rx_all <= recs['rx'].iloc[:-1].max()) &
+                        (pd_mean.iloc[jj, :] > 0)
+                )
+                rev_idx = np.where(rev_mask)[0]
 
-            weights = 1 / error
+                for ii in rev_idx:
+                    A[iii, ii] = -dx
+                    dphi[iii] = pd_mean.iloc[jj, ii]
+
+                    if rel_err is not None:
+                        variance[iii] = (rel_err * dphi[iii]) ** 2
+                    elif pd_std is not None:
+                        variance[iii] = pd_std.iloc[jj, ii] ** 2
+                    else:
+                        variance[iii] = 1.0
+
+                    iii += 1
+
+            # trim system to actual rows
+            A = A[:iii, :]
+            dphi = dphi[:iii]
+            variance = variance[:iii]
+
+            # enforce non-zero variance
+            variance = np.where(variance <= 0, np.median(variance[variance > 0]), variance)
+
+            # Weight matrix
+            weights = 1.0 / variance
             w = np.diag(weights)
 
+            # Solve ystem
             phi_vel, phi_model = tomo2D_phasediff(lam=lam, f=f, A=A, dphi=dphi, w=w)
             phi_vel_all[:, jj] = phi_vel
 
-            # if kwargs.setdefault('showFDBFResults', False):
-            #     recs_plot = np.asarray(recs_all['rx'].iloc[:-1])
-            #
-            #     axes = kwargs.pop('axes', None)
-            #     outfile = kwargs.pop('outfile', None)
-            #
-            #     if axes is None:
-            #         fig, ax = plt.subplots(1,2, figsize=(6, 2))
-            #     else:
-            #         ax = axes
-            #         fig = ax.figure
-            #
-            #     ax[0].plot(dphi,color = 'k', marker = 'o', markersize=5)
-            #     ax[0].plot(phi_model, color = 'r')
-            #     ax[0].set_xlabel("offset (m)")
-            #     ax[0].set_ylabel(f"phase differences (rad)")
-            #     ax[0].grid()
-            #
-            #     ax[1].scatter(recs_plot,phi_vel, s=15, c='darkgrey', marker ='o',
-            #               edgecolor='k', linewidth=0.2, zorder=-2, label = f'f = {round(f)} Hz')
-            #     ax[1].set_xlim([np.min(recs_plot),np.max(recs_plot)])
-            #     ax[1].set_ylim([10,600])
-            #     ax[1].set_ylabel(f"phase velocity (m/s)")
-            #     ax[1].set_xlabel("offset (m)")
-            #     ax[1].legend(loc = 'lower right', frameon=True)
-            #     ax[1].grid()
-            #
-            #     if outfile:
-            #         parent = os.path.dirname(outfile)
-            #         safe_makedirs(parent)
-            #         fig.savefig(outfile)
-            #         plt.close()
-            #     else:
-            #         plt.show()
+            # plot results
+            if kwargs.setdefault('showResults', False):
+                recs_plot = np.asarray(recs_all['rx'].iloc[:-1])
 
-        # add dispersion curves to database
+                axes = kwargs.pop('axes', None)
+                outfile = kwargs.pop('outfile', None)
+
+                if axes is None:
+                    fig, ax = plt.subplots(1,2, figsize=(6, 2))
+                else:
+                    ax = axes
+                    fig = ax.figure
+
+                ax[0].plot(dphi,color = 'k', marker = 'o', markersize=5)
+                ax[0].plot(phi_model, color = 'r')
+                ax[0].set_xlabel("offset (m)")
+                ax[0].set_ylabel(f"phase differences (rad)")
+                ax[0].grid()
+
+                ax[1].scatter(recs_plot,phi_vel, s=15, c='darkgrey', marker ='o',
+                          edgecolor='k', linewidth=0.2, zorder=-2, label = f'f = {round(f)} Hz')
+                ax[1].set_xlim([np.min(recs_plot),np.max(recs_plot)])
+                ax[1].set_ylim([10,600])
+                ax[1].set_ylabel(f"phase velocity (m/s)")
+                ax[1].set_xlabel("offset (m)")
+                ax[1].legend(loc = 'lower right', frameon=True)
+                ax[1].grid()
+
+                if outfile:
+                    parent = os.path.dirname(outfile)
+                    safe_makedirs(parent)
+                    fig.savefig(outfile)
+                    plt.close()
+                else:
+                    plt.show()
+
+        # Store curves
         xmids = recs_all['rx'].iloc[:-1].values + dx / 2
 
         for i in range(len(phi_vel_all)):
-
             data = {
-            'xmid': xmids[i],
-            'method': 'tomo2D',
-            'dc_mode': 0,
-            'f': freq,
-            'v': phi_vel_all[i,:],
-            'err': np.zeros_like(phi_vel_all[i,:])}
+                'xmid': xmids[i],
+                'method': 'tomo2D',
+                'dc_mode': 0,
+                'f': freq,
+                'v': phi_vel_all[i, :],
+                'err': np.zeros_like(phi_vel_all[i, :])
+            }
 
-            #params = {'sin': -1, 'rep': -1, 'procset': "'%s'" % procset, 'wid': -1, 'xmid': data['xmid']}
-            self._sql.write_curve(data, -1, -1, wid=-1, procset=procset, xmid = data['xmid'])
+            self._sql.write_curve(data, -1, -1, wid=-1,
+                                  procset=procset, xmid=data['xmid'])
 
-        endtime = time.time()
-        print(f'{np.round(endtime - starttime, 2)} s')
-
+        print(f'{np.round(time.time() - starttime, 2)} s')
 
     def process_curves(self, type='smooth', procset = None, method = 'tomo2D',dc_mode = 0,  **kwargs):
         """

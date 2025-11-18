@@ -215,6 +215,10 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
     path2geom: str, path to geometry file
     """
 
+    if '.syn' in path2shts[0]:
+        print('Seismic data with extension ".syn" does not contain geometry information.')
+        return
+
     from swa.stream import SeismicStream
 
     geom = pd.DataFrame(columns=['x','y','z','geo','shot','first_geo','ngeo'])

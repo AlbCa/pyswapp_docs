@@ -4,8 +4,6 @@ import os.path
 from collections import OrderedDict
 import numbers
 
-import matplotlib.pyplot as plt
-import numpy as np
 from scipy import signal, special
 from scipy import interpolate
 import obspy
@@ -13,7 +11,6 @@ import obspy.signal
 
 from matplotlib.figure import Figure
 from matplotlib.offsetbox import AnchoredText
-#from obspy.signal.filter import bandpass
 
 from .curve import DispersionCurve
 from .utils import *
@@ -23,9 +20,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
 warnings.simplefilter(action='ignore', category=RuntimeWarning)
 
-# TODO advanced F-K filtering
-# TODO LRT
-# TODO DLMO
 
 class SeismicStream:
     """class to manipulate a seismic record for the analysis of surface waves"""
@@ -111,7 +105,6 @@ class SeismicStream:
         self.wmino = self._settings["window_min_offset"].item() # minimum offset
         self.wmaxo= self._settings["window_max_offset"].item() # maximum offset
         self.wmove = self._settings["window_move"].item() # move increment
-
 
     def read_data(self, fname, channel_nr = 1001, pre_trigger=0, extract_geometry = False):
         """
@@ -556,7 +549,7 @@ class SeismicStream:
                     print("#### PROC DATA STATS ####")
                     print(trace.stats)
 
-    def _save_stream(self, fot, pre):
+    def save_stream(self, fot, pre):
         """save stream in .mseed file format"""
 
         safe_makedirs(fot)
@@ -770,7 +763,7 @@ class SeismicStream:
             min = kwargs.setdefault('min', 0)
             max = kwargs.setdefault('max', 0)
             self._trim_times_obspy(min,max)
-        elif by == 'time_v2':
+        elif by == 'time_range':
             min = kwargs.setdefault('min', 0)
             max = kwargs.setdefault('max', np.inf)
             self._trim_times(min,max)
@@ -794,7 +787,6 @@ class SeismicStream:
             self._remove_trace(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
-
 
     def _trim_times_obspy(self, start_cut_off, end_cut_off):
         """cut times of stream by providing the amount of time that should be cut-off
@@ -865,9 +857,6 @@ class SeismicStream:
                 # update stream
                 self._pst = st_new
                 self._update_params_from_stream(st_new)
-            # else:
-            #     warn_msg = 'Min and max offset out of bounds. No process applied to stream.'
-            #     self.logger.warning(warn_msg)
 
             return oids
         else:
@@ -877,7 +866,7 @@ class SeismicStream:
             return []
 
     def _trim_by_offset_both(self, min_offset, max_offset, which = 'forward'):
-        """cut traces outside of the offsets limits considering forward and reverse offset shot"""
+        """cut traces outside of the offset limits considering forward and reverse offset shot"""
 
         if self._pst is None:
             st_proc = self._st.copy()
@@ -974,10 +963,6 @@ class SeismicStream:
 
             self._select_traces(trace_select)
 
-        #     return trace_select
-        # else:
-        #     return None
-
     def _select_traces(self, trace_indices):
         """select a subset of a stream based on trace indices"""
 
@@ -1042,8 +1027,8 @@ class SeismicStream:
             vel = kwargs.setdefault('vel', None)
             bulk_shift = kwargs.setdefault('bulk_shift', 0)
             self._lmo(vel, bulk_shift)
-        elif by == 'mute':
-            self._mute(**kwargs)
+        # elif by == 'mute':
+        #     self._mute(**kwargs)
         elif by == 'mute_trace':
             trace_indices = kwargs.setdefault('ids', [])
             self._mute_traces(trace_indices)
@@ -1131,7 +1116,6 @@ class SeismicStream:
         # update
         self._pst = st_proc
 
-
     def _linear_mute(self, points,key='t', **kwargs):
         """
         linear mute
@@ -1213,11 +1197,7 @@ class SeismicStream:
             self._linear_mute(points_list, key, **kwargs)
 
     def _reset_mute(self):
-
-        if self._pst is None:
-            self._st = self._st_backup_mute
-        else:
-            self._pst = self._st_backup_mute
+        self._pst = self._st.copy()
 
     def _reset_mute_last(self):
 
@@ -1225,7 +1205,6 @@ class SeismicStream:
             self._st = self._st_backup_last_mute
         else:
             self._pst = self._st_backup_last_mute
-
 
     def _zero_padding(self,amps):
         """append zeros to amplitudes to achieve a desired resolution"""
@@ -1680,9 +1659,8 @@ class SeismicStream:
         self.velocity = vels
         self.wavenumber = ks
 
-    def _MOPA(self, weighted = False, std = None, rel_err = 5/100, abs_err = None,
-              stopAtChi2=2, taper_amps = True, **kwargs):
-        """Multi-offset phase analysis (MOPA; Strobbia and Foti, 2014)"""
+    def _MOPA(self,weighted=True,std=None,rel_err=5 / 100,abs_err=None,stopAtChi2=2,taper_amps=True,**kwargs):
+        """Multi-offset phase analysis (MOPA; Strobbia & Foti, 2014)."""
 
         dt = self.dt
         receiver = self.receiver
@@ -1697,10 +1675,7 @@ class SeismicStream:
         else:
             st = self._pst.copy()
 
-        if taper_amps:
-            amps = self._apply_taper(st=st, inplace=False)
-        else:
-            amps = self._amps(st=st)
+        amps = self._amps(st=st)
 
         if self.pad:
             amps,_,_ = self._zero_padding(amps)
@@ -1721,83 +1696,100 @@ class SeismicStream:
         fids = np.arange(min_id, max_id + 1, step=self.fstep)
         freq = freq[fids]
 
-        # fft
-        u = np.fft.fft(amps)
+        # FFT
+        u = np.fft.fft(amps, axis=1)
 
         results_dict_plotting = {}
+        picked_freqs = []
+        picked_vels = []
+        picked_chi2 = []
 
-        freqs = []
-        vel0s = []
-        chi2s = []
-
-        # MOPA
-        for j,f_index in enumerate(fids):
+        # MOPA Loop
+        for idx_out, f_index in enumerate(fids):
 
             chi2 = np.inf
-            offsets_index = 0
-            offsets_inv = offsets
+            off0 = 0  # index of first usable receiver
+            N = len(offsets)  # number of stations
 
-            # check the convergence and remove near offset geophones if chi^2 is too high
-            while (chi2 >= stopAtChi2) & (len(offsets[offsets_index:]) >= min_nrec):
+            # Unwrap phase
+            ph_raw = np.angle(u[:, f_index])
+            ph = np.unwrap(ph_raw)
 
-                offsets_inv = offsets[offsets_index:]
-                mag = np.abs(u[offsets_index:, f_index])
-                phase = np.angle(u[offsets_index:, f_index])
-                phi = np.unwrap(phase, axis=0)
+            u_fft = u[:, f_index]
+            mag_all = np.abs(u_fft)
 
-                weights = np.ones_like(phi)
+            # χ²-based offset removal
+            while chi2 >= stopAtChi2 and (N - off0) >= min_nrec:
+
+                offs = offsets[off0:]
+                phi = ph[off0:]
+                mag = mag_all[off0:]
+
+                # Weights
                 if weighted:
-
-                    if std is None:
-                        if abs_err is None:
-                            error = rel_err*phi
-                        else:
-                            error = abs_err
-
-                        var = np.var(error)
-                        weights *= 1/var
-
+                    if std is not None:
+                        weights = 1.0 / (std ** 2)
                     else:
-                        weights = 1/std**2
+                        # relative error or absolute error
+                        if abs_err is None:
+                            phase_error = rel_err * np.maximum(np.abs(phi), 1e-6)
+                        else:
+                            phase_error = np.full_like(phi, abs_err)
 
-                # linear LSQR to find k and phi0 of phi = -k*offset+phi0
-                k0, phi0 = linear_LSQR(offsets_inv, phi, weights)
+                        var = phase_error ** 2
+                        weights = 1.0 / np.maximum(var, 1e-12)
+                else:
+                    weights = np.ones_like(phi)
 
-                # response and fit
-                phi_resp = phase_response(offsets_inv, k0, phi0)
-                rms, rrms,chi2 = compute_chi2(phi, phi_resp, rel_err*phi)
+                k0, phi0 = linear_LSQR(offs, phi, weights)
 
-                offsets_index += 1
+                # Model response
+                phi_pred = phase_response(offs, k0, phi0)  # vector
 
+                err_model = rel_err * np.maximum(np.abs(phi), 1e-6)
+                _, _, chi2 = compute_chi2(phi, phi_pred, err_model)
+
+                # Try removing another near-offset receiver next iteration
+                off0 += 1
+
+            # Store result if converged
             if chi2 <= stopAtChi2:
-                freqs.append(freq[j])  # frequencies
-                vel0s.append(2 * np.pi * freq[j] / k0)  # phase velocities
-                chi2s.append(chi2)
+                f_val = freq[idx_out]
+                vel_val = 2 * np.pi * f_val / k0
 
-            # final inversion results
-            results_dict_plotting[j] = {'offsets': offsets_inv,
-                                        'mag': mag,
-                                        'phase': phase,
-                                        'k0': k0,
-                                        'phi0': phi0,
-                                        'freq': freq[j],
-                                        'vel': 2 * np.pi * freq[j] / k0,
-                                        'chi2':chi2}
+                picked_freqs.append(f_val)
+                picked_vels.append(vel_val)
+                picked_chi2.append(chi2)
 
-        if len(vel0s) > 0:
+            # Plotting dictionary
+            results_dict_plotting[idx_out] = {
+                "offsets": offs,
+                "mag": mag,
+                "phase": ph_raw[off0 - 1:],  # raw phase for plotting only
+                "k0": k0,
+                "phi0": phi0,
+                "freq": freq[idx_out],
+                "vel": 2 * np.pi * freq[idx_out] / k0,
+                "chi2": chi2,
+            }
 
-            # %% plot MOPA results
-            if kwargs.setdefault('showMOPAResults',False):
-                self._plotMOPA(results_dict_plotting,**kwargs)
+        # Final results: dispersion curve
+        if len(picked_vels) > 0:
 
-            # dispersion curve
+            if kwargs.setdefault("showMOPAResults", False):
+                self._plotMOPA(results_dict_plotting, **kwargs)
+
             self._pick = True
-            self.picks[self._pck_mode] = {0: {'f': np.array(freqs),
-                                               'v': np.array(vel0s),
-                                               'chi2': np.array(chi2s)}}
+            self.picks[self._pck_mode] = {
+                0: {
+                    "f": np.array(picked_freqs),
+                    "v": np.array(picked_vels),
+                    "chi2": np.array(picked_chi2),
+                }
+            }
+
         else:
-            warn_msg = 'No dispersion curve extracted.'
-            self.logger.warning(warn_msg)
+            self.logger.warning("No dispersion curve extracted.")
 
     def compute_phasediffs(self):
         """compute phase differences between adjacent receivers for one shot file"""
@@ -1810,13 +1802,7 @@ class SeismicStream:
         else:
             st = self._pst.copy()
 
-        # if taper_amps:
-        #     amps = self._apply_taper(st=st, inplace=False)
-        # else:
         amps = self._amps(st=st)
-
-        # if self.pad:
-        #     amps,_,_ = self._zero_padding(amps)
 
         if source > receiver[-1]:
             amps = np.flipud(amps)
@@ -1844,10 +1830,6 @@ class SeismicStream:
     def dcpicking(self, pck_mode = 'auto', auto_method = 'max', **kwargs):
         """automatic or interactive dispersion curve picking"""
 
-        # receiver = self.receiver
-        # source = self.source
-        # offsets = self._aoffsets(receiver,source)
-
         if pck_mode == 'auto':
             # Automatic dispersion curve extraction
 
@@ -1871,82 +1853,10 @@ class SeismicStream:
                 self._MOPA(**kwargs)
             else:
                 raise NotImplementedError
-
-        # #################
-        # # DEPRECATED!!!!!
-        # elif pck_mode == 'manual':
-        #
-        #     self.extraction_method = self.trafo_type
-        #
-        #     # interactive dispersion curve picking by selection of boundary boxes
-        #     if axes is None:
-        #         fig = plt.figure(figsize=(16, 9), constrained_layout=True)
-        #         gs = fig.add_gridspec(5, 2)
-        #         ax0 = fig.add_subplot(gs[0, 0:2])
-        #         ax1 = fig.add_subplot(gs[1:5, 0:2])
-        #     else:
-        #         ax0 = axes[0]
-        #         ax1 = axes[1]
-        #
-        #     if 'title' in kwargs:
-        #         title = kwargs.pop('title', None)
-        #         ax0.set_title(self.pre.replace('_',' ') + f" - xmid = {title} m", fontweight='bold')
-        #     else:
-        #         ax0.set_title(self.pre.replace('_', ' '), fontweight='bold')
-        #     ax0 = self._plotGeometry(axes = ax0, show = False)
-        #
-        #     # plot dispersion image
-        #     text = '\n'.join((
-        #         r'$\bf{Keyboard \quad commands:}$',
-        #         r'Press $\bf{e}$ to stop the process.',
-        #         r'Press any number to set dc index.',
-        #         r'Press $\bf{d}$ to delete boundary.',
-        #         r'Press $\bf{p}$ to pick a dc.',
-        #         r'Press $\bf{r}$ to reset picks.',
-        #         r'Scroll $\bf{up}$ to tighten and $\bf{down}$ to loosen boundary.'))
-        #     at = AnchoredText(text,
-        #                        loc='lower right', prop=dict(size=6), frameon=True,bbox_to_anchor=(1., 1.),
-        #                bbox_transform=ax1.transAxes)
-        #     ax1.add_artist(at)
-        #     ax1 = self._plotDispersionImage(axes=ax1, show = False, **kwargs)
-        #
-        #     ax1.set_title(f"Dispersion curve picking", fontweight="bold")
-        #
-        #     # show picked dc curves for same xmid location
-        #     if 'dc_prior' in kwargs:
-        #         dc_fnames = kwargs['dc_prior']
-        #         for i in range(len(dc_fnames)):
-        #             curve = DispersionCurve()
-        #             curve.read(dc_fnames[i])
-        #             curve.plot(axes=ax1,
-        #                           color='r',
-        #                           alpha = 0.1,
-        #                           size = 10,
-        #                           axis_style = False,
-        #                           marker = '.',
-        #                           show_orig=False)
-        #
-        #     # pick polygons
-        #     dcpicker = DCPickingInteractive(ax1,self.frequency, self.velocity,
-        #                                     self.dispersive_energy, offsets = offsets)
-        #     plt.show()
-        #
-        #     # retrieve picks
-        #     picks = dcpicker.picks
-        #
-        #     if len(picks) != 0:
-        #         self.picks[pck_mode] = picks
-        #         self._pick = True
-        #
-        #     else:
-        #         self._pick = False
-        # #################
-
         else:
             raise ValueError(f'Picking mode not recognized. Use one of the key: "auto" \n '
                              f'for automatic dispersion curve extraction. \n'
                              f'Use the gui for manual dispersion curve picking.')
-
 
     # %% WINDOWING
     def moving_window(self, **kwargs):
@@ -2069,7 +1979,6 @@ class SeismicStream:
         kwargs
         -------
         """
-
 
         xmid = self.midpoint
 
@@ -3019,7 +2928,7 @@ class SeismicStream:
         ax[0].set_title('MOPA - Shotfile: ' + self.pre, fontweight='bold')
         fig.align_ylabels(ax)
 
-        #plt.tight_layout()
+        plt.tight_layout()
 
         if outfile:
             fig.savefig(outfile)

@@ -52,18 +52,33 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
     phi_model: np.ndarray, phase model
     """
 
-    nm = len(A[0,:]) # corresponds to number of receivers
-    G = np.zeros((nm-1,nm)) # first-order differential operator
-    for i in range(nm-1):
-        G[i,i] = 1
-        G[i,i+1] = -1
+    nm = A.shape[1]
 
-    Ni = np.transpose(A) @ w @ A
-    Mi = np.transpose(G) @  G
+    # first-order finite difference operator
+    G = np.zeros((nm - 1, nm))
+    for i in range(nm - 1):
+        G[i, i] = 1
+        G[i, i + 1] = -1
 
-    m = np.linalg.inv(Ni + lam ** 2 * Mi) @ np.transpose(A) @ w @ dphi
+    # weighted least squares matrices
+    ATW = A.T @ w
+    Ni = ATW @ A  # data term
+    Mi = G.T @ G  # smoothness term
 
-    phi_vel = -2*np.pi*f/m
-    phi_model = A@m
+    # solve (Ni + λ² Mi) m = Aᵀ W dφ
+    rhs = ATW @ dphi
+
+    Mreg = Ni + (lam ** 2) * Mi
+    m = np.linalg.solve(Mreg, rhs)
+
+    # m is dφ/dx = (ω/c)
+    omega = 2 * np.pi * f
+
+    # avoid division by zero
+    eps = 1e-12
+    m = np.where(np.abs(m) < eps, eps, m)
+
+    phi_vel = -omega / m  # (nrec - 1)
+    phi_model = A @ m  # predicted phase differences
 
     return phi_vel, phi_model
