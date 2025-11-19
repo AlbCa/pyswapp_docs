@@ -30,10 +30,9 @@ def compute_chi2(data, resp, error):
 
     rms = np.sqrt(np.mean(np.abs(misfit) ** 2))
     rrms = np.sqrt(np.mean((np.abs(misfit)/np.abs(data)) ** 2))
-    chi2 = np.mean(error_weighted_misfit ** 2)
+    chi2 = np.sum(error_weighted_misfit**2)
     return rms, rrms, chi2
 
-# TODO Ausgleichstest, Anzahl an Freiheitsgraden
 def tomo2D_phasediff(lam,f,A,dphi,w):
     """
     Tomographic like approach (Barone et al., 2019)

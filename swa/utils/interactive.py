@@ -306,6 +306,7 @@ class SeismoInteractive(DraggablePoints):
     def picks(self):
         return self._points
 
+
 class FKFilterInteractive(DraggablePoints):
 
     def __init__(self, ax, points=None, data  = None, picks = None, **kwargs):
@@ -369,6 +370,7 @@ class FKFilterInteractive(DraggablePoints):
     @property
     def picks(self):
         return self._points
+
 
 class DCPickingInteractive(DraggablePoints):
     """class for drawing boundaries for dispersion curve extraction"""

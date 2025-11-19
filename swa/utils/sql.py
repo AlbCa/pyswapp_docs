@@ -2,7 +2,6 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import math
-import time
 
 class StdevFunc:
     """SQLITE aggregate stdev"""
@@ -28,10 +27,7 @@ class SQL:
     """Handle an SQLite database"""
     def __init__(self, database):
 
-        #con = None
         self.database = database
-        #
-        # self._connect()
 
     def get_connection(self):
         con = sqlite3.connect(self.database)
@@ -584,8 +580,11 @@ class SQL:
             #if self.check_data('pd', params):
             self.to_sql(df, name = 'pd', if_exists = 'append', index = False)
 
-    def read_pd(self, sin, procset='proc1', calc='NONE', columns = ['*']):
+    def read_pd(self, sin, procset='proc1', calc='NONE', columns = '*'):
         """get phase differences for a certain sin/procset pair"""
+
+        if not isinstance(columns, list):
+            columns = list(columns)
 
         if 'pd' in self.get_tables():
 

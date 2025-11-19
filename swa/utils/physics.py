@@ -55,56 +55,76 @@ def vs2vp(vs, nu):
 def vp2vs(vp, nu):
     """compute vs from vp and nu"""
     return vp / ( np.sqrt(2 * (1 - nu) / (1 - 2 * nu)))
-#
-#
-# def estimate_vs_range(vr):
-#     """estimate the vs range from vr velocity (Cox and Teague, 2016)"""
-#
-#     vs_min = np.min(vr)*1.04
-#     vs_max = np.max(vr)*1.16
-#
-#     return (vs_min, vs_max)
 
 
 def lorentzian_err(offsets, vel, f, nchannels = 24, dx = 1, **kwargs):
-    """estimate dispersion curve error if only one dispersion curve is provided
-       after O'Neill (2002)"""
+    """
+    Estimate dispersion-curve uncertainty after O'Neill (2002).
 
-    # some parameters
-    maxerr = kwargs.pop('maxerr',0.4)  # Maximum error ratio (0.4 = error won't be higher than 40% of the velocity)
-    minvelerr = kwargs.pop('minvelerr', 20)  # Minimum error (in m/s)
-    a = kwargs.pop('a', 0.3)  # default a parameter (0.5 recommended by A. O'Neill,
-    # 0.75 seems to fit better according to Pasquet) increase to tighten errorbars
+    Parameters
+    ----------
+    offsets : array-like or None
+        Receiver offsets. If provided, dx and nchannels are inferred from it.
+    vel : float or array-like
+        Phase velocity.
+    f : float or array-like
+        Frequency.
+    nchannels : int, optional
+        Number of channels (ignored if offsets provided).
+    dx : float, optional
+        Receiver spacing (ignored if offsets provided).
+    maxerr : float
+        Maximum relative velocity error (e.g., 0.4 means ≤40% of velocity).
+    minvelerr : float
+        Minimum absolute velocity error (m/s).
+    a : float
+        Parameter controlling error-bar tightening.
 
+    Returns
+    -------
+    deltac : float or np.ndarray
+        Estimated dispersion-curve error.
+    """
+
+    maxerr = kwargs.get('maxerr', 0.4)
+    minvelerr = kwargs.get('minvelerr', 20)
+    a = kwargs.get('a', 0.3)
+
+    # Ensure arrays
+    vel = np.asarray(vel, dtype=float)
+    f = np.asarray(f, dtype=float)
+
+    # Determine dx and nchannels from offsets if provided
     if offsets is not None:
-        nchannels = len(offsets) # number of active receiver
-        dx = abs(offsets[1]-offsets[0]) # number of receiver separation
-    else:
-        nchannels = nchannels
-        dx = dx
+        offsets = np.asarray(offsets, dtype=float)
+        if len(offsets) < 2:
+            raise ValueError("Offsets must contain at least two values.")
+        nchannels = len(offsets)
+        dx = abs(offsets[1] - offsets[0])
 
-    lam = wavelength(f,vel)
+    # wavelength function must exist
+    lam = wavelength(f, vel)
+
+    # avoid division problems
+    lam = np.maximum(lam, 1e-12)
+
+    # geometric factor
     fac = 10 ** (1 / np.sqrt(nchannels * dx))
 
-    # error calculation
-    avec = 1/vel - 1 / (2*vel/lam * (nchannels * fac) * dx)
-    bvec = 1/vel + 1 / (2*vel/lam * (nchannels * fac) * dx)
-    deltac = (10**(-a))*abs(1/avec - 1/bvec)
+    # define a common denominator for clarity
+    denom = 2 * vel / lam * (nchannels * fac) * dx
+    denom = np.maximum(denom, 1e-12)
 
-    if not isinstance(f, Iterable):
-        vel = np.array([vel])
-        deltac = np.array([deltac])
+    avec = 1 / vel - 1 / denom
+    bvec = 1 / vel + 1 / denom
 
-    delta_up = np.where(deltac > (maxerr * vel))[0]
-    delta_lo = np.where(deltac < minvelerr)[0]
+    deltac = (10 ** -a) * np.abs(1 / avec - 1 / bvec)
 
-    if (len(delta_up) > 0) & isinstance(vel, Iterable):
-        deltac[delta_up] = maxerr * vel[delta_up]
+    # Enforce max and min error thresholds
+    deltac = np.maximum(deltac, minvelerr)
+    deltac = np.minimum(deltac, maxerr * vel)
 
-    if len(delta_lo) > 0:
-        deltac[delta_lo] = minvelerr
-
-    if isinstance(f, Iterable):
-        return deltac
-    else:
-        return deltac[0]
+    # Return scalar if inputs were scalar
+    if deltac.size == 1:
+        return float(deltac)
+    return deltac

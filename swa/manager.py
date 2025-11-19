@@ -1,13 +1,9 @@
 
 import sys
 import time
-import copy
-
-import matplotlib.pyplot as plt
 
 from .utils import *
 from .stream import SeismicStream
-from .curve import DispersionCurve
 from .curves import CombineCurves
 from .qtapps import *
 
@@ -20,7 +16,6 @@ from .qtapps import *
 # --> change warnings to logging!
 # TODO: documentation!!!
 # TODO: change settings midprocessing
-# TODO: check what is happening with roll-along data
 # TODO: stacking technique SWIP??
 # TODO: avoid unnessesary dicts
 
@@ -2128,7 +2123,7 @@ class Tomo2DManager(BaseManager):
 
         np.set_printoptions(threshold=sys.maxsize)
         starttime = time.time()
-        print(f'Running tomographic-like approach ..... ', end='')
+        print(f'Running tomographic-like approach')
 
         # ensure phasediff table exists
         if 'pd' not in self._sql.get_tables():
@@ -2197,7 +2192,7 @@ class Tomo2DManager(BaseManager):
 
                     # variance
                     if rel_err is not None:
-                        variance[iii] = (rel_err * dphi[iii]) ** 2
+                        variance[iii] = (rel_err * abs(dphi[iii]))
                     elif pd_std is not None:
                         variance[iii] = pd_std.iloc[jj, ii] ** 2
                     else:
@@ -2220,7 +2215,7 @@ class Tomo2DManager(BaseManager):
                     dphi[iii] = pd_mean.iloc[jj, ii]
 
                     if rel_err is not None:
-                        variance[iii] = (rel_err * dphi[iii]) ** 2
+                        variance[iii] = (rel_err * abs(dphi[iii]))
                     elif pd_std is not None:
                         variance[iii] = pd_std.iloc[jj, ii] ** 2
                     else:
@@ -2229,20 +2224,27 @@ class Tomo2DManager(BaseManager):
                     iii += 1
 
             # trim system to actual rows
-            A = A[:iii, :]
-            dphi = dphi[:iii]
-            variance = variance[:iii]
-
-            # enforce non-zero variance
-            variance = np.where(variance <= 0, np.median(variance[variance > 0]), variance)
+            id = np.all(A == 0, axis=1)
+            A = A[~id]
+            dphi = dphi[~id.reshape((-1,))]
+            variance = variance[~id.reshape((-1,))]
 
             # Weight matrix
             weights = 1.0 / variance
+
             w = np.diag(weights)
 
-            # Solve ystem
+            # Solve system
             phi_vel, phi_model = tomo2D_phasediff(lam=lam, f=f, A=A, dphi=dphi, w=w)
             phi_vel_all[:, jj] = phi_vel
+
+            # print output
+            print('#'*45 + '\n')
+            text = (f'f = {np.round(f,2)} Hz, '
+                    f'‖x_pre - x_obs‖ = {np.linalg.norm(phi_model - dphi).round(3)}'
+                    )  + '\n'
+            print(text)
+            #print('#' * 80  + '\n')
 
             # plot results
             if kwargs.setdefault('showResults', False):
@@ -2255,7 +2257,7 @@ class Tomo2DManager(BaseManager):
                     parent = os.path.dirname(outfile)
                     safe_makedirs(parent)
 
-                plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, axes, outfile)
+                plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, f, axes, outfile)
 
         # Store curves
         xmids = recs_all['rx'].iloc[:-1].values + dx / 2
@@ -2273,7 +2275,7 @@ class Tomo2DManager(BaseManager):
             self._sql.write_curve(data, -1, -1, wid=-1,
                                   procset=procset, xmid=data['xmid'])
 
-        print(f'{np.round(time.time() - starttime, 2)} s')
+        print(f'Finished tomographic-like approach ..... {np.round(time.time() - starttime, 2)} s')
 
     def process_curves(self, type='smooth', procset = None, method = 'tomo2D',dc_mode = 0,  **kwargs):
         """

@@ -216,8 +216,14 @@ class DataSwitcherBase(QWidget):
         self.kwargs = kwargs
 
         self.taper = {}
-        for i in range(len(self.labels)):
-            self.taper[i] = {'taper_amps': True}
+        if not self.is_grouped:
+            for i in range(len(self.all_labels)):
+                self.taper[i] = {'taper_amps': True}
+        else:
+            for i, labels in enumerate(self.all_labels):
+                self.taper[i] = {}
+                for j in range(len(labels)):
+                    self.taper[i][j] = {'taper_amps': True}
 
         self.init_ui()
         self.update_display()
@@ -637,7 +643,6 @@ class DataSwitcherBase(QWidget):
         event.accept()
         plt.close('all')
 
-# TODO: add picking from FK, Radon
 
 class DataSwitcherPick(DataSwitcherBase):
     """Manual dispersion curve picking interface"""
@@ -1056,11 +1061,14 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             points = self.points.get(self.current_index, {})
             picks = self.picks.get(self.current_index, {})
 
+            taper = self.taper[self.current_index] if not self.is_grouped else (
+                self.taper)[self.group_index][self.current_index]
+
             self.interactor = self.interaction_class(ax,
                                                      points=points,
                                                      data = self.stream,
                                                      picks = picks,
-                                                     **self.kwargs, **self.taper[self.current_index])
+                                                     **self.kwargs, **taper)
 
             #if self.interactor.picks:
             self.points[self.current_index] = self.interactor.points
@@ -1083,13 +1091,20 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
                 stream = self.interactor.filter()
                 self.points[self.current_index] = {}
-                self.taper[self.current_index]['taper_amps'] = False
 
+                if not self.is_grouped:
+                    self.taper[self.current_index]['taper_amps'] = False
+                else:
+                    self.taper[self.group_index][self.current_index]['taper_amps'] = False
             # reset
             else:
                 stream = copy.deepcopy(self.stream)
                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
-                self.taper[self.current_index]['taper_amps'] = True
+
+                if not self.is_grouped:
+                    self.taper[self.current_index]['taper_amps'] = True
+                else:
+                    self.taper[self.group_index][self.current_index]['taper_amps'] = True
 
             # overwrite in db
             self._write_data(stream, label[0], label[1], self.procset, label[2])

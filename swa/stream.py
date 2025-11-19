@@ -1659,7 +1659,7 @@ class SeismicStream:
         self.velocity = vels
         self.wavenumber = ks
 
-    def _MOPA(self,weighted=True,std=None,rel_err=5 / 100,abs_err=None,stopAtChi2=2,taper_amps=True,**kwargs):
+    def _MOPA(self,std=None,rel_err=None,abs_err=None,stopAtChi2=2,**kwargs):
         """Multi-offset phase analysis (MOPA; Strobbia & Foti, 2014)."""
 
         dt = self.dt
@@ -1669,6 +1669,11 @@ class SeismicStream:
         # receiver-source offsets and amplitudes
         offsets = self._aoffsets(receiver,source)
         min_nrec = kwargs.pop('min_nrec',12)
+
+        if std is None and rel_err is None and abs_err is None:
+            weighted = False
+        else:
+            weighted = True
 
         if self._pst is None:
             st = self._st.copy()
@@ -1732,12 +1737,11 @@ class SeismicStream:
                     else:
                         # relative error or absolute error
                         if abs_err is None:
-                            phase_error = rel_err * np.maximum(np.abs(phi), 1e-6)
+                            phase_error = rel_err * np.abs(phi)
                         else:
                             phase_error = np.full_like(phi, abs_err)
 
-                        var = phase_error ** 2
-                        weights = 1.0 / np.maximum(var, 1e-12)
+                        weights = 1.0 / phase_error
                 else:
                     weights = np.ones_like(phi)
 
@@ -1746,8 +1750,7 @@ class SeismicStream:
                 # Model response
                 phi_pred = phase_response(offs, k0, phi0)  # vector
 
-                err_model = rel_err * np.maximum(np.abs(phi), 1e-6)
-                _, _, chi2 = compute_chi2(phi, phi_pred, err_model)
+                _, _, chi2 = compute_chi2(phi, phi_pred, weights)
 
                 # Try removing another near-offset receiver next iteration
                 off0 += 1
@@ -1776,7 +1779,7 @@ class SeismicStream:
         # Final results: dispersion curve
         if len(picked_vels) > 0:
 
-            if kwargs.setdefault("showMOPAResults", False):
+            if kwargs.setdefault("showResults", False):
                 self._plotMOPA(results_dict_plotting, **kwargs)
 
             self._pick = True
@@ -2748,12 +2751,12 @@ class SeismicStream:
 
         keyy = kwargs.pop("key","vel")
 
-        if keyy == "vel":
-            daty = self.velocity
-            labely = "phase velocity (m/s)"
-        elif keyy == "k":
+        if keyy == "k":
             daty = self.wavenumber
             labely = "wavenumber (rad/m)"
+        else:
+            daty = self.velocity
+            labely = "phase velocity (m/s)"
 
         datx = self.frequency
         labelx = "frequency (Hz)"
@@ -2811,6 +2814,7 @@ class SeismicStream:
             ax0 = axes[0]
             ax1 = axes[1]
             ax2 = axes[2]
+            fig = axes.figure
 
         # plot geometry
         self._plotGeometry(axes = ax0)

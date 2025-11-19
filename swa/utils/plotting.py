@@ -5,8 +5,6 @@ from matplotlib.cm import ScalarMappable,get_cmap
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 
-import os
-
 # %% helper functions for plotting
 def calculate_new_limit(fixed, dependent, limit):
     """Calculates the min/max of the dependent axis given
@@ -36,32 +34,6 @@ def get_xy(artist):
     elif "Line" in str(artist):
         x, y = artist.get_xdata(), artist.get_ydata()
     return x, y
-
-
-def autoscale(ax=None, axis='y', margin=0.1):
-    """autoscales the x or y axis of a given matplotlib ax object"""
-    if ax is None:
-        ax = plt.gca()
-    newlow, newhigh = np.inf, -np.inf
-
-    for artist in ax.collections + ax.lines:
-        x, y = get_xy(artist)
-        if axis == 'y':
-            setlim = ax.set_ylim
-            lim = ax.get_xlim()
-            fixed, dependent = x, y
-        else:
-            setlim = ax.set_xlim
-            lim = ax.get_ylim()
-            fixed, dependent = y, x
-
-        low, high = calculate_new_limit(fixed, dependent, lim)
-        newlow = low if low < newlow else newlow
-        newhigh = high if high > newhigh else newhigh
-
-    margin = margin * (newhigh - newlow)
-
-    setlim(newlow - margin, newhigh + margin)
 
 
 def discrete_cmap(N, base_cmap=None):
@@ -100,7 +72,7 @@ def draw1DColumn(ax, x, val, thk=None, depth = None, width=1, vmin=1, vmax=1000,
     return col
 
 
-def plot_vphase(ax, val, f=None, lam=None, xmid=0, vmin=100, vmax=1000, y_value = 'lam',width = 1,**kwargs):
+def plot_vphase(ax, val, f, lam=None, xmid=0, vmin=100, vmax=1000, y_value = 'lam',width = 1,**kwargs):
     """draw dispersion curve as 1D column"""
 
     cmap = kwargs.setdefault('cmap','viridis')
@@ -109,7 +81,7 @@ def plot_vphase(ax, val, f=None, lam=None, xmid=0, vmin=100, vmax=1000, y_value 
 
         if lam is not None:
             wavelength = lam
-        elif f is not None:
+        else:
             wavelength = val / f
 
         wavelength = np.array(wavelength)
@@ -160,7 +132,7 @@ def plot_colorBar(ax,vmin,vmax, orientation='vertical', size=0.2, pad=None,**kwa
 
     return cbar
 
-def plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, axes = None, outfile = None):
+def plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, f, axes = None, outfile = None):
     """plot tomographic like approach"""
 
     if axes is None:

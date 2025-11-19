@@ -1,19 +1,9 @@
-"""python class for manipulating an Obspy stream"""
-import numpy as np
 import sys
-
-from matplotlib.widgets import PolygonSelector
-from matplotlib.offsetbox import AnchoredText
-
-from .utils import *
-from .curve import DispersionCurve
 from .qtapps import *
 
 import collections
 import warnings
 
-# TODO improve the class, especially the interactive filtering etc
-# TODO create app for filtering!
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -115,7 +105,7 @@ class CombineCurves:
         return lam_vec, vr_vec
 
     @staticmethod
-    def _binning(lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None, **kwargs):
+    def _binning(lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None):
         """combination of dispersion curves from SW measurements (Olafsdottir, 2018)"""
 
         # %% binning process
@@ -202,15 +192,10 @@ class CombineCurves:
 
         data = collections.OrderedDict(sorted(data.items()))
 
-        #for key in data.keys():
-            #self.filter_xmid(key)
-
         self.filter_xmid(data)
 
     def filter_xmid(self, data):
         """filter data points at one x-locations if necessary"""
-
-        #data = self.data
 
         app = QApplication(sys.argv)
 
@@ -277,6 +262,7 @@ class CombineCurves:
                 fig, ax = plt.subplots(figsize=(6, 4))
             else:
                 ax = axes
+                fig = ax.figure
 
             for i in data[key].keys():
                 if i != 'cmb':

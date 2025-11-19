@@ -1,4 +1,3 @@
-"""python class for manipulating an Obspy stream"""
 import matplotlib.path as mpltPath
 from scipy import interpolate
 
