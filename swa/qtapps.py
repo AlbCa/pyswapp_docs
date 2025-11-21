@@ -1252,7 +1252,6 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
         except Exception as e:
             self.logger.exception(f"FK interaction failed: {e}")
-            self.show_popup(f"FK interaction error:\n{e}")
 
     def show_popup(self):
         """Show keyboard shortcuts for FK filter."""
