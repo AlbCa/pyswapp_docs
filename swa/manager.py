@@ -398,7 +398,8 @@ class BaseManager:
             self._set_data(tmp, sin, rep, self._loadset, wid)
             func = getattr(tmp, type)
             func(**kwargs)
-            #self.data[sin][rep] = stream
+            if wid == -1:
+                self.data[sin][rep] = tmp
             self._write_data(tmp, sin,rep, procset, wid)
 
     def preprocess(self, type, procset=None, use_windows = True, **kwargs):
@@ -503,7 +504,8 @@ class BaseManager:
             tmp = copy.deepcopy(stream)
             self._set_data(tmp, sin, rep, self._loadset, wid)
             tmp.transform(method=method, **kwargs)
-            #self.data[sin][rep] = stream
+            if wid == -1:
+                self.data[sin][rep] = tmp
             self._write_FV(tmp,  sin, rep, procset, wid)
 
     def transform(self, method='phaseshift', procset=None, use_windows=True, **kwargs):

@@ -765,7 +765,7 @@ class SeismicStream:
             self._trim_times_obspy(min,max)
         elif by == 'time_range':
             min = kwargs.setdefault('min', 0)
-            max = kwargs.setdefault('max', np.inf)
+            max = kwargs.setdefault('max', 0)
             self._trim_times(min,max)
         elif by == 'offset':
             min = kwargs.setdefault('min', -1e10)

@@ -221,7 +221,14 @@ class DataSwitcherBase(QWidget):
 
         self.labels = self._get_current_labels()
         self.btn_label = btn_label
+
         self.kwargs = kwargs
+
+        self._interact_kwargs = {
+            'taper_type': self.kwargs.pop('taper_type', 'tukey'),
+            'tapering': self.kwargs.pop('tapering', 'mild'),
+            'taper_length': self.kwargs.pop('taper_length', 5),
+        }
 
         # Taper initialization
         self.taper = {}
@@ -533,7 +540,7 @@ class DataSwitcherBase(QWidget):
                 picks = self.get_picks()
 
                 self.interactor = self.interaction_class(
-                    ax, points=points, data=self.stream, picks=picks, **self.kwargs
+                    ax, points=points, data=self.stream, picks=picks, **self._interact_kwargs
                 )
                 self.points[self.current_index] = self.interactor.points
                 self.picks[self.current_index] = self.interactor.picks
@@ -1201,7 +1208,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
                 self.interactor = self.interaction_class(
                     ax, points=points, data=self.stream,
-                    picks=picks, **self.kwargs, **taper
+                    picks=picks, **self._interact_kwargs, **taper
                 )
 
                 self.points[self.current_index] = self.interactor.points
