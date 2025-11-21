@@ -20,14 +20,14 @@ swam.set_procset_label(procset)
 swam.load_procset(procset)
 
 # dispersion curves
-swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 5)
-swam.extract_curves(apply_to = 'all', method = 'MOPA', use_windows=True, stopAtChi2 = 1, rel_err = 15/100)
+# swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 5)
+# swam.extract_curves(method = 'MOPA', stopAtChi2 = 1, rel_err = 15/100)
 
 # set the data for the combination process and sort based on receiver spread mid point
-swam.prepare_CC(method = 'MOPA', use_windows=True)
+swam.prepare_CC(method = 'MOPA')
 
 # run some processes from the CC class, e.g., manual filtering of the sorted dispersion curves
-# swam.CC.filter_all()
+swam.filter_CC()
 
 # combine the dispersion curves
 CC_kwargs = {'mode' : 0,    # mode 0 = binning; mode 1 = resampling to same frequency range and mean/std calculation
@@ -35,10 +35,10 @@ CC_kwargs = {'mode' : 0,    # mode 0 = binning; mode 1 = resampling to same freq
             'xlim' : [5,80],  # xlimit for plotting
             'ylim' : [50,400],# ylimit for plotting
             'show': False}      # show the combined dc
-swam.combine(method = 'MOPA', use_windows=True, **CC_kwargs)
+swam.combine(method = 'MOPA',**CC_kwargs)
 
 # process the dispersion curves if necessary
-# swam.process_CC(attr='smooth', method='MOPA')
+# swam.process_CC(type='smooth', method='MOPA')
 
 # save the dispersion curves to a file
 swam.save_CC(method='MOPA')

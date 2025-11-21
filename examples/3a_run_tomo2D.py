@@ -22,28 +22,28 @@ swam.load_procset('tomo2D')
 swam.set_procset_label(procset)
 
 # Retrieve subsets from data corresponding to forward and reverse shots
-swam.prepare_streams(min_offset=3, max_offset=1e6, min_rec = 12)
+swam.prepare_streams(min_offset=5, max_offset=1e6, min_rec = 12)
 
 # # Apply preprocessing steps to the data (e.g., FK filtering based on existing filters)
 # FK_kwargs = {'fname':path2fk, # specify a file name from which FK filter should be imported
 #              'show':False,     # show the filtered FK spectrum
 #               }
-# swam.preprocess_streams(attr='filter', by = 'FK', cmap = 'Greys', **FK_kwargs)
-#
-# Apply preprocessing steps to the data (e.g., FK filtering interactively)
+# swam.preprocess_streams(type='filter', by = 'FK', cmap = 'Greys', **FK_kwargs)
+
+# FK filtering interactively)
 swam.gui_interact('FK',use_windows=True)
 
 # Compute the phase differences of the processed data
 swam.compute_phasediff()
 
 # Run the tomo2D
-swam.run(lam = 200, min_offset = 10, max_offset = 40, rel_err = 15/100)
+swam.run(lam = 15, min_offset = 5, max_offset = 1e6, abs_err = 0.01)
 
 # Plot the pseudosection
 swam.plot('pseudosection', method = 'tomo2D', cmap='cividis')
 
-# # Process the dispersion curves
-# swam.process_curves(attr = 'smooth')
+# Process the dispersion curves
+swam.process_curves(type = 'smooth')
 
-# Save the dispersion curves
+#Save the dispersion curves
 swam.save(procset=procset, method='tomo2D', dc_mode=0, format = 'csv')

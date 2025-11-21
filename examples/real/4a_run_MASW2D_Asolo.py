@@ -1,7 +1,10 @@
-from matplotlib import interactive
-
+import sys
+import os
+nb_dir = os.path.dirname(os.path.abspath("__file__")) # get nb absolute path
+prj_root = os.path.abspath(os.path.join(nb_dir, "/home/Natalie/Documents/Projects/GIT/swa")) # set swa path
+sys.path.append(prj_root) # add path
 from swa import *
-from swa import Tomo2DManager
+
 
 # %% MASW2D
 # directories
@@ -16,21 +19,59 @@ procset = 'proc1' # processing set label
 settings = create_settings(fmin=10, fmax=50,                  # frequency range
                          vmin=10, vmax=1000, velstep=1)     # testing phase velocity range and step
 
-swam = MASW2DManager(f'{prj_dir}/proc/test_MASW2D',path2raw=path2raw,path2geom=path2geom, settings=settings)
+swam = MASW2DManager(f'{prj_dir}/proc/test_MASW2D_v3')
 
+# %%
+swam.gui_view(attr='FK')
+
+swam.gui_interact(attr='FK')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# %%
+# processing_kwargs = {'min': 10, 'max': 1e10} # arguments for the processing
+#swam.preprocess_streams(procset = procset,attr='trim', apply_to = 'all',by = 'offset',**processing_kwargs)
+# swam.preprocess_streams(procset = procset,attr='filter', apply_to = 'all',by = 'mute')
+#swam.plot_streams(attr = 'geometry')
+
+#swam.moving_window(minoffset = 2, maxoffset = 10, wlen = 24, wmove = 4)
 # plot data
-swam.plot_streams(attr='seismogram', apply_to = 'cur')
+#swam.plot_streams(attr='geometry', use_windows=True)
+#swam.test_plot(attr='seismogram',procset='raw')
+#swam.plot_streams(attr='seismogram', use_windows=True)
+# swam.transform('phaseshift', use_windows=True)
+# swam.plot_streams(attr='dispersionImageComposite', use_windows=True,procset='proc1')
+#swam.plot(attr='spectrogram')
+#swam.plot_streams(attr='spectra', apply_to = 'cur')
+#swam.plot_streams(attr='dispersionImage', apply_to = 'cur', use_windows=True)
+# swam.transform('phaseshift', use_windows=True)
 
-# set a new procset label
-swam.set_procset_label(procset)
+# %%
 
-# apply preprocessing step to the whole data (apply_to = 'all')
-processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
-swam.preprocess_streams(attr='trim', apply_to = 'cur',by = 'offset',**processing_kwargs)
+#swam.plot_streams(attr='SFR', apply_to = 'cur')
 
-# reverse polarity
-swam.preprocess_streams(attr='filter', apply_to = 'cur',by = 'reverse_polarity', ids = range(10,40))
-swam.plot_streams(attr='seismogram', apply_to = 'cur')
+# # set a new procset label
+# swam.set_procset_label(procset)
+#
+# # apply preprocessing step to the whole data (apply_to = 'all')
+# processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
+# swam.preprocess_streams(attr='trim', apply_to = 'cur',by = 'offset',**processing_kwargs)
+#
+# # reverse polarity
+# swam.preprocess_streams(attr='filter', apply_to = 'cur',by = 'reverse_polarity', ids = range(10,40))
+# swam.plot_streams(attr='seismogram', apply_to = 'cur')
 # #
 # # extract dispersion curves automatically for all files (apply_to = 'all')
 # # swam.extract_curves(apply_to = 'all', pck_mode='auto', auto_method = 'max')
