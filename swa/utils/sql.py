@@ -29,40 +29,11 @@ class SQL:
 
         self.database = database
 
+    # %% Connection
     def get_connection(self):
         con = sqlite3.connect(self.database)
         con.create_aggregate("STDEV", 1, StdevFunc)
         return con
-
-    def _connect(self):
-        """Create a connection to a SQL database"""
-        self.con = sqlite3.connect(self.database)
-        self.con.create_aggregate("STDEV", 1, StdevFunc)
-
-    def _disconnect(self):
-        """Close the connection to a SQL database"""
-        self.con.close()
-        self.con = None
-
-    def _create_table(self, name, columns, types):
-        """Create a sql table"""
-
-        with self.get_connection() as con:
-
-            ncols = len(columns)
-            ntypes = len(types)
-
-            if ncols != ntypes:
-                raise ValueError('Number of column names and types are not the same. %d != %d' % (ncols,ntypes))
-
-            sql = ['CREATE TABLE %s (' % name]
-            for i in range(ncols):
-                if i < (ncols-1):
-                    sql.append('%s %s, ' % (columns[i], types[i]))
-                else:
-                    sql.append('%s %s); ' % (columns[i], types[i]))
-
-            con.execute(''.join(sql))
 
     def to_sql(self, df, name, if_exists='fail', **kwargs):
         """Write data stored in a DataFrame to a SQL database"""
@@ -76,6 +47,89 @@ class SQL:
         with self.get_connection() as con:
             return pd.read_sql(sql,con=con)
 
+    # %% Table management
+    def _create_table(self, name, columns, types):
+        """Create a SQL table"""
+
+        if len(columns) != len(types):
+            raise ValueError(
+                f"Number of column names and types do not match: "
+                f"{len(columns)} != {len(types)}")
+
+        def is_valid_identifier(identifier):
+            return identifier.replace("_", "").isalnum()
+
+        if not is_valid_identifier(name):
+            raise ValueError(f"Invalid table name: {name}")
+
+        for col in columns:
+            if not is_valid_identifier(col):
+                raise ValueError(f"Invalid column name: {col}")
+
+        # Build column definitions
+        column_defs = ", ".join(f"{col} {typ}" for col, typ in zip(columns, types))
+        sql = f"CREATE TABLE {name} ({column_defs});"
+
+        # Execute SQL
+        with self.get_connection() as con:
+            con.execute(sql)
+
+    def _create_tables(self):
+        """Create all database tables"""
+
+        # AMPS table
+        recs = self.get_table('recs')
+        columns = ['procset', 'wid', 'sin', 'rep']
+        types = ['TEXT', 'INT', 'INT', 'INT']
+        amps_columns = [f"rin{i}" for i in recs.rin.iloc]
+        amps_types = ['FLOAT'] * len(amps_columns)
+        all_columns = columns + amps_columns
+        all_types = types + amps_types
+
+        self._create_table('amps', all_columns, all_types)
+
+        # PAR table
+        self._create_table('par',
+                           ['procset', 'wid', 'sin', 'rep',
+                            'npts', 'dt', 'delay', 'sampling_rate'],
+                           ['TEXT', 'INT', 'INT', 'INT',
+                            'INT', 'FLOAT', 'FLOAT', 'FLOAT'])
+
+        # PID table
+        self._create_table('pid',
+                           ['procset', 'wid', 'sin', 'rep', 'rin'],
+                           ['TEXT', 'INT', 'INT', 'INT', 'INT'])
+
+        # FV table
+        self._create_table(
+            'FV',
+            ['procset', 'wid', 'sin', 'rep', 'method',
+             'velocity', 'wavenumber', 'f_id', 'f_value', 're', 'im'],
+            ['TEXT', 'INT', 'INT', 'INT', 'TEXT',
+             'FLOAT', 'FLOAT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT']
+        )
+
+        # PD table
+        columns = ['procset', 'calc', 'sin', 'rep', 'wid', 'fids', 'frequency']
+        types = ['TEXT', 'TEXT', 'INT', 'INT', 'INT', 'INT', 'FLOAT']
+        pd_columns = [f"pd{i}" for i in recs.rin.iloc[:-1]]
+        pd_types = ['FLOAT'] * len(pd_columns)
+        all_columns = columns + pd_columns
+        all_types = types + pd_types
+        self._create_table('pd', all_columns, all_types)
+
+        # CURVE table
+        self._create_table('curve',
+                           ['procset', 'wid', 'sin', 'rep', 'xmid',
+                            'method', 'dc_mode', 'frequency', 'velocity', 'error'],
+                           ['TEXT', 'INT', 'INT', 'INT', 'FLOAT',
+                            'TEXT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT'])
+
+        # FILTER table
+        self._create_table('filter',
+                           ['procset', 'wid', 'sin', 'rep','key','xp','yp','type'],
+                           ['TEXT', 'INT', 'INT', 'INT', 'TEXT', 'FLOAT', 'FLOAT', 'TEXT'])
+
     def get_table(self,name):
         """Return a table form the database as DataFrame"""
         return self.read_sql("""SELECT * FROM %s""" % name)
@@ -87,15 +141,55 @@ class SQL:
             con.execute(f"""DROP TABLE IF EXISTS {name}""")
 
     def show_tables(self):
-        """Show tables"""
-        table_names = self.get_tables()
-        print('Tables in project: ', end='')
-        for i,name in enumerate(table_names):
-            if i < len(table_names)-1:
-                end = ', '
+        """Print all table names in the database."""
+        tables = self.get_tables()
+        print("Tables in project: " + ", ".join(tables))
+
+    def _fmt(self, value):
+        """Helper to safely format values"""
+        with self.get_connection() as con:
+            return con.execute("SELECT quote(?)", (value,)).fetchone()[0]
+
+    def check_data(self, table, params):
+        """Check if entry in database"""
+
+        if table not in self.get_tables():
+            return pd.DataFrame().empty
+
+        sql = """SELECT procset, sin, rep
+                  FROM %s
+                  WHERE """ % table
+
+        npar = len(params)
+        for i, key in enumerate(params.keys()):
+
+            if i < npar - 1:
+                sql += f"{key}=={params[key]} AND "
             else:
-                end = '\n'
-            print(name,end = end)
+                sql += f"{key}=={params[key]}"
+
+        df = self.read_sql(sql)
+
+        return df.empty
+
+    def delete_data(self, table, params):
+        """delete entry from database"""
+
+        with self.get_connection() as con:
+
+            try:
+                sql = """DELETE FROM %s WHERE """ % table
+                npar = len(params)
+
+                for i, key in enumerate(params.keys()):
+                    if i < npar - 1:
+                        sql += f"{key}=={params[key]} AND "
+                    else:
+                        sql += f"{key}=={params[key]}"
+                con.execute(sql)
+
+            except sqlite3.OperationalError:
+                pass
 
     def get_tables(self):
         """Get all table names"""
@@ -105,101 +199,101 @@ class SQL:
             table_list = [name[0] for name in table_names]
             return table_list
 
-    def _append_shots_df(self, shots, geom, column_name):
-        """append the shots DataFrame"""
-
-        tmp = pd.DataFrame(geom.loc[geom.shots != '-1', [column_name]])
-        tmp[column_name] = tmp[column_name].str.split(';')
-        tmp = tmp.explode(column_name).astype(int)
-        shots[column_name] = tmp
-        return shots
-
     # %% Interaction with the geometry information
-    def read_geometry(self,geometry_file):
-        """read formikoj geometry file and add to database"""
+    # %% geometry information
+    def read_geometry(self, geometry_file):
+        """Read geometry CSV file and populate geom, shots, and recs tables"""
 
-        geom = pd.read_csv(geometry_file,delimiter=',',header=None,
-                           names=['x', 'y', 'z',
-                          'geophone', 'shots',
-                          'first_geophone', 'num_geophones'])
-        geom = geom.astype({'shots':str, 'first_geophone':str,'num_geophones':str})
+        # Read geometry file
+        geom = pd.read_csv(geometry_file, delimiter=',', header=None,
+                           names=['x', 'y', 'z', 'geophone', 'shots', 'first_geophone', 'num_geophones'])
+        geom = geom.astype({'shots': str, 'first_geophone': str, 'num_geophones': str})
         geom.insert(0, 'station_id', np.arange(len(geom)) + 1)
 
-        shots = pd.DataFrame(geom.loc[geom.shots != '-1', ['station_id','shots']])
+        # Shots DataFrame
+        shots = pd.DataFrame(geom.loc[geom.shots != '-1', ['station_id', 'shots']])
         shots.insert(1, 'sin', np.arange(len(shots)) + 1)
-
-        # split repeated shots at the same source location and add as new line
         shots['shots'] = shots['shots'].str.split(';')
         shots = shots.explode('shots')
-        shots.insert(2,'rep', shots.groupby('station_id').cumcount()+1)
-        shots = self._append_shots_df(shots, geom, 'first_geophone')
-        shots = self._append_shots_df(shots, geom, 'num_geophones')
+        shots.insert(2, 'rep', shots.groupby('station_id').cumcount() + 1)
 
-        # geophone indices
+        # Helper to append other columns
+        def _append_shots_df(shots_df, geom_df, col_name):
+            tmp = pd.DataFrame(geom_df.loc[geom_df.shots != '-1', [col_name]])
+            tmp[col_name] = tmp[col_name].str.split(';')
+            tmp = tmp.explode(col_name).astype(int)
+            shots_df[col_name] = tmp
+            return shots_df
+
+        shots = _append_shots_df(shots, geom, 'first_geophone')
+        shots = _append_shots_df(shots, geom, 'num_geophones')
+
+        # Geophone indices (receivers)
         recs = pd.DataFrame(geom[geom.geophone > 0]['station_id'])
         recs.insert(0, 'rin', np.arange(len(recs)) + 1)
-        recs.astype({'rin':int, 'station_id':int})
+        recs = recs.astype({'rin': int, 'station_id': int})
 
-        # add to database
-        self.to_sql(geom,'geom', if_exists='replace')
+        # Create tables if not exists
+        self._create_table('geom',
+                           ['station_id', 'x', 'y', 'z', 'geophone', 'shots', 'first_geophone', 'num_geophones'],
+                           ['INT', 'FLOAT', 'FLOAT', 'FLOAT', 'INT', 'INT', 'INT', 'INT'])
+        self._create_table('shots', ['station_id', 'sin', 'rep', 'shots', 'first_geophone', 'num_geophones'],
+                           ['INT', 'INT', 'INT', 'INT', 'INT', 'INT'])
+        self._create_table('recs', ['rin', 'station_id'], ['INT', 'INT'])
+
+        # Write to database
+        self.to_sql(geom, 'geom', if_exists='replace')
         self.to_sql(shots, 'shots', if_exists='replace')
         self.to_sql(recs, 'recs', if_exists='replace')
 
+        # create all tables
+        self._create_tables()
 
-    def get_geometry(self, sin, rep = 1):
-        """Return the geometry information (source and receiver coordinates) for one source location and shot index
-           as DataFrames"""
+    def get_geometry(self, sin, rep=1):
+        """Return source/receiver coordinates for one source location and shot index"""
 
-        # return for one sin/rep pair
         if sin != '*':
-
-            sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
-                     FROM geom g
-                     INNER JOIN shots s ON s.station_id == g.station_id
-                     WHERE s.rep==%d AND s.sin==%d""" % (rep,sin)
+            sql = f"""SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, 
+                      g.x sx, g.y sy, g.z sz
+                      FROM geom g
+                      INNER JOIN shots s ON s.station_id == g.station_id
+                      WHERE s.rep=={rep} AND s.sin=={sin}"""
             sht = self.read_sql(sql)
-
             if len(sht) != 1:
                 raise ValueError('Number of shots should be 1.')
 
-            rec = pd.DataFrame(columns=['rin', 'rx', 'ry','rz'])
-            for i,rin in enumerate(np.arange(sht.fg.item(),sht.ng.item()+sht.fg.item())):
-                sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
-                         FROM geom g
-                         INNER JOIN recs r ON r.station_id == g.station_id
-                         WHERE r.rin==%d""" % rin
-                tmp = self.read_sql(sql)
-                rec = pd.concat([rec,tmp])
+            rec = pd.DataFrame(columns=['rin', 'rx', 'ry', 'rz'])
+            for rin in range(sht.fg.item(), sht.fg.item() + sht.ng.item()):
+                sql = f"""SELECT r.rin, g.x rx, g.y ry, g.z rz
+                          FROM geom g
+                          INNER JOIN recs r ON r.station_id == g.station_id
+                          WHERE r.rin=={rin}"""
+                rec = pd.concat([rec, self.read_sql(sql)])
 
-        # return all
         else:
+            # Return all
             sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
                      FROM geom g
                      INNER JOIN shots s ON s.station_id == g.station_id"""
             sht = self.read_sql(sql)
-
             rec = pd.DataFrame(columns=['rin', 'rx', 'ry', 'rz'])
             for j in range(len(sht)):
-                for i, rin in enumerate(np.arange(sht.fg.iloc[j], sht.ng.iloc[j] + sht.fg.iloc[j])):
-                    sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
-                             FROM geom g
-                             INNER JOIN recs r ON r.station_id == g.station_id
-                             WHERE r.rin==%d""" % rin
-                    tmp = self.read_sql(sql)
-                    rec = pd.concat([rec, tmp])
+                for rin in range(sht.fg.iloc[j], sht.fg.iloc[j] + sht.ng.iloc[j]):
+                    sql = f"""SELECT r.rin, g.x rx, g.y ry, g.z rz
+                              FROM geom g
+                              INNER JOIN recs r ON r.station_id == g.station_id
+                              WHERE r.rin=={rin}"""
+                    rec = pd.concat([rec, self.read_sql(sql)])
+            rec.drop_duplicates(inplace=True, ignore_index=True)
 
-            rec.drop_duplicates(inplace = True, ignore_index=True)
+        return sht.reset_index(drop=True), rec.reset_index(drop=True)
 
-        return sht.reset_index(), rec.reset_index()
-
-    def get_shotfile(self, sin, rep = 1):
+    def get_shotfile(self, sin, rep=1):
         """Return the name of one shot file"""
-        sql = """SELECT s.shots
-                 FROM shots s
-                 WHERE s.rep==%d AND s.sin==%d""" % (rep,sin)
-        sht = self.read_sql(sql)
-
-        return sht
+        sql = f"""SELECT s.shots
+                  FROM shots s
+                  WHERE s.rep=={rep} AND s.sin=={sin}"""
+        return self.read_sql(sql)
 
     # %% Interaction with settings
     def read_setting(self, settings):
@@ -214,8 +308,7 @@ class SQL:
     def get_proc_labels(self):
         sql = """SELECT DISTINCT procset
                  FROM amps"""
-        labels = self.read_sql(sql)['procset'].values
-        return labels
+        return self.read_sql(sql)['procset'].values
 
     def get_trafo_labels(self,procset, use_windows = False):
 
@@ -233,48 +326,7 @@ class SQL:
 
         return []
 
-    def check_data(self,table, params):
-        """Check if entry in database"""
-
-        if table not in self.get_tables():
-            return pd.DataFrame().empty
-
-        sql = """SELECT procset, sin, rep
-                  FROM %s
-                  WHERE """ % table
-
-        npar = len(params)
-        for i,key in enumerate(params.keys()):
-
-            if i < npar-1:
-                sql += f"{key}=={params[key]} AND "
-            else:
-                sql += f"{key}=={params[key]}"
-
-        df = self.read_sql(sql)
-
-        return df.empty
-
-    def delete_data(self,table, params):
-        """delete entry from database"""
-
-        with self.get_connection() as con:
-
-            try:
-                sql = """DELETE FROM %s WHERE """ % table
-                npar = len(params)
-
-                for i,key in enumerate(params.keys()):
-                    if i < npar-1:
-                        sql += f"{key}=={params[key]} AND "
-                    else:
-                        sql += f"{key}=={params[key]}"
-                con.execute(sql)
-
-            except sqlite3.OperationalError:
-                pass
-
-    def dublicate_data(self,data, sin, rep, wid=-1):
+    def duplicate_data(self,data, sin, rep, wid=-1):
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % 'tmp', 'wid': wid}
         if self.check_data('amps', params):
@@ -286,16 +338,7 @@ class SQL:
         # TABLE amps
         # table column names
         recs = self.get_table('recs')
-        columns = ['procset', 'wid', 'sin', 'rep']
-        for i in recs.rin:
-            columns.append('rin%d'%i)
-
-        # table column types
-        types = ['TEXT', 'INT', 'INT', 'INT'] + ['FLOAT'] * len(recs)
-
-        # create the table if it does not exist
-        if 'amps' not in self.get_tables():
-            self._create_table('amps',columns,types)
+        columns = ['procset', 'wid', 'sin', 'rep'] + [f"rin{i}" for i in recs.rin.iloc]
 
         # create DataFrame
         df = pd.DataFrame(columns=columns)
@@ -330,25 +373,13 @@ class SQL:
         # table column names
         columns = ['procset', 'wid', 'sin', 'rep', 'npts', 'dt', 'delay', 'sampling_rate']
 
-        # table column types
-        types = ['TEXT', 'INT', 'INT', 'INT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT']
-
-        if 'par' not in self.get_tables():
-            self._create_table('par',columns,types)
-
         # create DataFrame
         par = [procset, wid, sin, rep, cur_npts, cur_dt, cur_delay, cur_sampling_rate]
         par_df = pd.DataFrame([par],columns=columns)
 
         # TABLE pid
-        # table column types
+        # table column names
         columns = ['procset', 'wid', 'sin', 'rep', 'rin']
-        # table column types
-        types = ['TEXT', 'INT', 'INT', 'INT', 'INT']
-
-        # create the table if it does not exist
-        if 'pid' not in self.get_tables():
-            self._create_table('pid',columns,types)
 
         # create DataFrame
         pid = np.c_[np.full(len(rin),sin),
@@ -370,7 +401,7 @@ class SQL:
                 self.delete_data('amps',params)
                 self.delete_data('par', params)
                 self.delete_data('pid',params)
-                #if self.check_data('amps', params):
+
                 self.to_sql(df,name = 'amps', if_exists = 'append', index = False)
                 self.to_sql(par_df, name='par', if_exists='append', index=False)
                 self.to_sql(pid_df, name='pid', if_exists='append', index=False)
@@ -397,122 +428,100 @@ class SQL:
         par = self.read_sql(sql)
 
         # check if query was successful and select data
-        if (not recs.empty) & (not sht.empty) & (not par.empty):
-            columns = []
-            for i in recs.rin:
-                columns.append('rin%d'%i)
-            sql = f"""SELECT {', '.join(columns)}
-                     FROM amps
-                     WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d""" % (procset, wid, sin,rep)
-            amps = self.read_sql(sql)
-
-            return par, amps, recs, sht
-        else:
+        if recs.empty or sht.empty or par.empty:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    def write_FV(self, data, sin, rep, procset = 'proc1', wid = -1):
+        amp_cols = [f'rin{i}' for i in recs.rin]
+        sql_amps = f"""
+            SELECT {', '.join(amp_cols)}
+            FROM amps
+            WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d""" % (procset, wid, sin,rep)
+
+        amps = self.read_sql(sql_amps)
+        return par, amps, recs, sht
+
+    # %% FV data
+    def write_FV(self, data, sin, rep, procset='proc1', wid=-1):
         """write dispersion image data to database"""
 
         cur_stream = data
-        cur_FV = cur_stream.dispersive_energy  # FV spectrum (vels, freq)
-        cur_freq = cur_stream.frequency  # frequency range
+        FV = cur_stream.dispersive_energy  # FV spectrum (vels, freq)
+        freq = cur_stream.frequency  # frequency range
         cur_vel = cur_stream.velocity  # testing phase velocity
         cur_ks = cur_stream.wavenumber  # wavenumber
         method = cur_stream.trafo_type
 
-        # %% table for FV
-        # table name
-        tn = 'FV'
+        n_vel = len(cur_vel)
+        n_freq = len(freq)
 
-        # table column names
-        columns = ['procset', 'wid', 'method', 'sin', 'rep', 'velocity', 'wavenumber']
-        for i,f in enumerate(cur_freq):
-            columns.append('f%d'%i)
+        rows = []
+        for v in range(n_vel):
+            for f in range(n_freq):
+                rows.append({
+                    'procset': procset,
+                    'wid': wid,
+                    'sin': sin,
+                    'rep': rep,
+                    'method': method,
+                    'velocity': float(cur_vel[v]),
+                    'wavenumber': float(cur_ks[v]),
+                    'f_id': int(f),
+                    'f_value': float(freq[f]),
+                    're': float(FV[v, f].real),
+                    'im': float(FV[v, f].imag),
+                })
 
-        # table column types
-        types = ['TEXT', 'INT', 'TEXT', 'INT', 'INT', 'FLOAT', 'FLOAT'] + ['TEXT'] * len(cur_freq)
-
-        # create DataFrame
-        df2 = pd.DataFrame(cur_FV,columns=columns[7:])
-        for col in columns[7:]:
-            df2[col] = df2[col].astype(str)
-
-        df1 = pd.DataFrame({'procset':procset,
-                            'wid': wid,
-                            'method':method,
-                            'sin': sin,
-                            'rep': rep,
-                            'velocity':cur_vel,
-                            'wavenumber':cur_ks})
-
-        df = pd.concat([df1,df2], axis=1)
-
-        # create the table if it does not exist
-        if tn not in self.get_tables():
-            self._create_table(tn, columns, types)
+        df = pd.DataFrame(rows)
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % procset, 'wid': wid, 'method': "'%s'" % method}
-        # append to table or replace if exists
-        if self.check_data(tn, params):
-            self.to_sql(df, name=tn, if_exists='append', index=False)
+        if self.check_data('FV', params):
+            self.to_sql(df, name='FV', if_exists='append', index=False)
         else:
-            self.delete_data(tn, params)
-            self.to_sql(df, name=tn, if_exists='append', index=False)
+            self.delete_data('FV', params)
+            self.to_sql(df, name='FV', if_exists='append', index=False)
 
-        # %% Table for frequency
-        tn = 'freq'
-        # table column names
-        columns = ['procset', 'wid', 'method', 'sin', 'rep', 'frequency']
-
-        # table column types
-        types = ['TEXT', 'INT', 'TEXT', 'INT', 'INT', 'FLOAT']
-
-        # create DataFrame
-        df = pd.DataFrame({'procset':procset,
-                            'wid': wid,
-                            'method': method,
-                            'sin': sin,
-                            'rep': rep,
-                            'frequency':cur_freq})
-
-        # create the table if it does not exist
-        if tn not in self.get_tables():
-            self._create_table(tn, columns, types)
-
-        # append to table or replace if exists
-        if self.check_data(tn,params):
-            self.to_sql(df,name = tn, if_exists = 'append', index = False)
-        else:
-            self.delete_data(tn,params)
-            self.to_sql(df, name = tn, if_exists = 'append', index = False)
-
-
-    def read_FV(self, sin, rep, procset='proc1', method='phaseshift', wid = -1):
+    def read_FV(self, sin, rep, procset='proc1', method='phaseshift', wid=-1):
         """get data from table FV for a certain wave-field transformation method"""
 
-        if 'FV' in self.get_tables():
-            sql = ("""SELECT *
-                     FROM FV
-                     WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d AND method=='%s'"""
-                   % (procset, wid, sin, rep, method))
-            FV = self.read_sql(sql)
-
-            sql = ("""SELECT frequency
-                     FROM freq
-                     WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d AND method=='%s'"""
-                   % (procset, wid, sin, rep, method))
-            freq = self.read_sql(sql)
-
-            if not FV.empty:
-                freq = freq.frequency.values
-                vel = FV.velocity.values
-                kw = FV.wavenumber.values
-                FV = FV.iloc[:, 7:7 + len(freq)].astype(complex).values
-                return vel, kw, freq, FV
-            else:
-                return None, None, None, None
-        else:
+        if 'FV' not in self.get_tables():
             return None, None, None, None
+
+        sql = f"""
+                    SELECT * FROM FV
+                    WHERE procset='{procset}'
+                      AND wid={wid}
+                      AND sin={sin}
+                      AND rep={rep}
+                      AND method='{method}'
+                    ORDER BY velocity, f_id
+                """
+
+        df = self.read_sql(sql)
+        if df.empty:
+            return None, None, None, None
+
+        velocities = df['velocity'].unique()
+        freq_vals = df['f_value'].unique()
+
+        n_vel = len(velocities)
+        n_freq = len(freq_vals)
+
+        # Reconstruct FV matrix
+        FV = np.zeros((n_vel, n_freq), dtype=complex)
+
+        for v_idx, vel in enumerate(velocities):
+            block = df[df.velocity == vel]
+            # sorted by f_id
+            block = block.sort_values('f_id')
+            FV[v_idx, :] = block['re'].values + 1j * block['im'].values
+
+        wavenumbers = (
+            df.groupby('velocity')['wavenumber']
+            .first()
+            .values
+        )
+
+        return velocities, wavenumbers, freq_vals, FV
 
     def get_wids(self, sin, rep, procset):
         """return the window ids for a sin/rep pair"""
@@ -520,28 +529,12 @@ class SQL:
         sql = ("""SELECT DISTINCT wid
                  FROM amps
                  WHERE procset=='%s' AND sin==%d AND rep==%d AND wid!=-1""" % (procset, sin, rep))
+
         df = self.read_sql(sql)
-        if not df.empty:
-            return df.wid.to_list()
-        else:
-            return []
+        return sorted(df["wid"].tolist()) if not df.empty else []
 
     def write_pd(self, df, sin, rep, procset = 'proc1'):
         """write phase differences to database"""
-
-        # TABLE pd
-        # table column names
-        recs = self.get_table('recs')
-        columns = ['procset', 'calc', 'sin', 'rep', 'wid', 'fids', 'frequency']
-        for i in recs.rin.iloc[:-1]:
-            columns.append('pd%d'%i)
-
-        # table column types
-        types = ['TEXT', 'TEXT', 'INT', 'INT', 'INT', 'INT', 'FLOAT'] + ['FLOAT'] * (len(recs)-1)
-
-        # create the table if it does not exist
-        if 'pd' not in self.get_tables():
-            self._create_table('pd',columns,types)
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % procset, 'wid': -1, 'calc': "'NONE'"}
         # append to table or replace if exists
@@ -556,29 +549,41 @@ class SQL:
         """Group phase difference data in case of repeated shots"""
 
         recs = self.get_table('recs')
-        columns = ['procset', 'calc', 'sin', 'rep', 'wid', 'fids', 'frequency']
-        for i in recs.rin.iloc[:-1]:
-            columns.append('%s(pd%d) as pd%d' % (by,i,i))
 
-        sql = "SELECT "
-        for i,col in enumerate(columns):
-            if i < len(columns)-1:
-                sql+= col + ', '
-            else:
-                sql+= col + (" FROM pd WHERE procset=='%s' AND sin==%d "
-                             "GROUP BY fids") % (procset, sin)
+        # Static columns
+        base_cols = ["procset", "calc", "sin", "rep", "wid", "fids", "frequency"]
+
+        # Aggregated receiver columns
+        pd_cols = [
+            f"{by}(pd{rin}) AS pd{rin}"
+            for rin in recs.rin.iloc[:-1]
+        ]
+
+        select_cols = ", ".join(base_cols + pd_cols)
+
+        sql = f"""
+            SELECT {select_cols}
+            FROM pd
+            WHERE procset = '{procset}' AND sin = {sin}
+            GROUP BY fids
+        """
 
         df = self.read_sql(sql).replace({None: np.nan})
-        df['calc'] = by
+        df["calc"] = by
 
-        params = {'sin': sin, 'procset': "'%s'" % procset, 'wid': -1, 'calc': "'%s'" % by}
-        # append to table or replace if exists
-        if self.check_data('pd',params):
-            self.to_sql(df,name = 'pd', if_exists = 'append', index = False)
+        params = {
+            "sin": sin,
+            "procset": f"'{procset}'",
+            "wid": -1,
+            "calc": f"'{by}'"
+        }
+
+        # Insert or replace
+        if self.check_data("pd", params):
+            self.to_sql(df, name="pd", if_exists="append", index=False)
         else:
-            self.delete_data('pd',params)
-            #if self.check_data('pd', params):
-            self.to_sql(df, name = 'pd', if_exists = 'append', index = False)
+            self.delete_data("pd", params)
+            self.to_sql(df, name="pd", if_exists="append", index=False)
 
     def read_pd(self, sin, procset='proc1', calc='NONE', columns = '*'):
         """get phase differences for a certain sin/procset pair"""
@@ -586,34 +591,16 @@ class SQL:
         if not isinstance(columns, list):
             columns = list(columns)
 
-        if 'pd' in self.get_tables():
+        sql = (f"""SELECT {', '.join(columns)}
+                 FROM pd
+                 WHERE procset=='%s'AND sin==%d AND calc=='%s'"""
+               % (procset, sin, calc))
 
-            sql = (f"""SELECT {', '.join(columns)}
-                     FROM pd
-                     WHERE procset=='%s'AND sin==%d AND calc=='%s'"""
-                   % (procset, sin, calc))
-
-            phase_diff = self.read_sql(sql).replace({None: np.nan})
-            return phase_diff
-        else:
-            return pd.DataFrame()
+        phase_diff = self.read_sql(sql).replace({None: np.nan})
+        return phase_diff
 
     def write_curve(self, data, sin, rep, procset = 'proc1', wid = -1, xmid = 0):
-        """write dispersion image data to database"""
-
-        # %% table curve
-        # table name
-        tn = 'curve'
-
-        # table column names
-        columns = ['procset', 'wid', 'sin', 'rep', 'xmid', 'method', 'dc_mode', 'frequency', 'velocity', 'error']
-
-        # table column types
-        types = ['TEXT', 'INT', 'INT', 'INT', 'FLOAT', 'TEXT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT']
-
-        # create the table if it does not exist
-        if tn not in self.get_tables():
-            self._create_table(tn, columns, types)
+        """write dispersion curves to database"""
 
         df = pd.DataFrame({'procset':procset,
                             'wid': wid,
@@ -632,50 +619,32 @@ class SQL:
                   'sin': sin, 'rep': rep, 'wid': wid, 'xmid': xmid}
 
         # append to table or replace if exists
-        if self.check_data(tn,params):
-            self.to_sql(df,name = tn, if_exists = 'append', index = False)
+        if self.check_data('curve',params):
+            self.to_sql(df,name = 'curve', if_exists = 'append', index = False)
         else:
-            self.delete_data(tn,params)
-            self.to_sql(df, name = tn, if_exists = 'append', index = False)
+            self.delete_data('curve',params)
+            self.to_sql(df, name = 'curve', if_exists = 'append', index = False)
 
     def read_curve(self, params):
-        """get data from table FV for a certain wave-field transformation method"""
+        """get data from table curve"""
 
-        if 'curve' in self.get_tables():
+        sql = """SELECT *
+                  FROM curve
+                  WHERE """
 
-            sql = """SELECT *
-                      FROM curve
-                      WHERE """
+        npar = len(params)
+        for i, key in enumerate(params.keys()):
+            if i < npar - 1:
+                sql += f"{key}=={params[key]} AND "
+            else:
+                sql += f"{key}=={params[key]}"
 
-            npar = len(params)
-            for i, key in enumerate(params.keys()):
+        curve = self.read_sql(sql)
+        return curve
 
-                if i < npar - 1:
-                    sql += f"{key}=={params[key]} AND "
-                else:
-                    sql += f"{key}=={params[key]}"
-
-            curve = self.read_sql(sql)
-            return curve
-        else:
-            return pd.DataFrame()
 
     def write_filter(self, points, sin, rep, key = 't', procset = 'proc1', wid = -1, type = 'FK'):
         """write filter to data base"""
-
-        # %% table curve
-        # table name
-        tn = 'filter'
-
-        # table column names
-        columns = ['procset', 'wid', 'sin', 'rep','key','xp','yp','type']
-
-        # table column types
-        types = ['TEXT', 'INT', 'INT', 'INT', 'TEXT', 'FLOAT', 'FLOAT', 'TEXT']
-
-        # create the table if it does not exist
-        if tn not in self.get_tables():
-            self._create_table(tn, columns, types)
 
         x, y = zip(*sorted(points.items()))
 
@@ -688,31 +657,27 @@ class SQL:
                            'yp':y,
                            'type':type})
 
-        self.to_sql(df,name = tn, if_exists = 'append', index = False)
+        self.to_sql(df,name = 'filter', if_exists = 'append', index = False)
 
     def read_filter(self, params):
-        """get data from table FV for a certain wave-field transformation method"""
+        """get data from table filter"""
 
-        if 'filter' in self.get_tables():
+        sql = """SELECT *
+                  FROM filter
+                  WHERE """
 
-            sql = """SELECT *
-                      FROM filter
-                      WHERE """
+        npar = len(params)
+        for i, key in enumerate(params.keys()):
 
-            npar = len(params)
-            for i, key in enumerate(params.keys()):
+            if i < npar - 1:
+                sql += f"{key}=={params[key]} AND "
+            else:
+                sql += f"{key}=={params[key]}"
 
-                if i < npar - 1:
-                    sql += f"{key}=={params[key]} AND "
-                else:
-                    sql += f"{key}=={params[key]}"
+        filter = self.read_sql(sql)
 
-            filter = self.read_sql(sql)
+        filter.sort_values(['key', 'xp'], ascending=[True, True],inplace=True)
+        filter.reset_index(inplace = True, drop = True)
 
-            filter.sort_values(['key', 'xp'], ascending=[True, True],inplace=True)
-            filter.reset_index(inplace = True, drop = True)
-
-            return filter
-        else:
-            return pd.DataFrame()
+        return filter
 

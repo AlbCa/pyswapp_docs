@@ -143,7 +143,7 @@ def plot_tomo2D(dphi, phi_model, recs_plot, phi_vel, f, axes = None, outfile = N
 
     ax[0].plot(dphi, color='k', marker='o', markersize=5)
     ax[0].plot(phi_model, color='r')
-    ax[0].set_xlabel("offset (m)")
+    ax[0].set_xlabel("x (m)")
     ax[0].set_ylabel(f"phase differences (rad)")
     ax[0].grid()
 
