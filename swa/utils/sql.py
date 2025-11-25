@@ -212,10 +212,8 @@ class SQL:
 
         # Shots DataFrame
         shots = pd.DataFrame(geom.loc[geom.shots != '-1', ['station_id', 'shots']])
-        shots.insert(1, 'sin', np.arange(len(shots)) + 1)
         shots['shots'] = shots['shots'].str.split(';')
         shots = shots.explode('shots')
-        shots.insert(2, 'rep', shots.groupby('station_id').cumcount() + 1)
 
         # Helper to append other columns
         def _append_shots_df(shots_df, geom_df, col_name):
@@ -227,6 +225,9 @@ class SQL:
 
         shots = _append_shots_df(shots, geom, 'first_geophone')
         shots = _append_shots_df(shots, geom, 'num_geophones')
+
+        shots.insert(2, 'rep', shots.groupby(['station_id', 'first_geophone', 'num_geophones']).cumcount() + 1)
+        shots.insert(1, 'sin', (shots.rep.values == 1).cumsum())
 
         # Geophone indices (receivers)
         recs = pd.DataFrame(geom[geom.geophone > 0]['station_id'])

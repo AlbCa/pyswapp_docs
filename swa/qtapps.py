@@ -489,7 +489,7 @@ class DataSwitcherBase(QWidget):
                 if not self.is_grouped:
                     self.label.setText(
                         f"SIN {label[0]} | REP {label[1]}"
-                        if figure0 else f"SIN {label[0]} | REP {label[1]} | No data"
+                        if figure0 else f"SIN {label[0]} | REP {label[1]}"
                     )
                 else:
                     self.label.setText(

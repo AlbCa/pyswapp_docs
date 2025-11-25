@@ -2529,7 +2529,7 @@ class SeismicStream:
         """plot FK image"""
 
         figsize = kwargs.pop('figsize', (8, 8))
-        cmap = kwargs.pop('cmap', 'viridis')
+        cmap = kwargs.pop('cmap', 'Greys')
 
         if axes is None:
             if gui:
@@ -2769,7 +2769,7 @@ class SeismicStream:
                            dispersive_energy.real,
                            contours,
                            #extend='both',
-                           cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'viridis')))
+                           cmap=plt.cm.get_cmap(kwargs.pop('cmap', 'Greys')))
 
         ax.grid(True, linestyle=':')
         ax.set_xlabel(labelx)
