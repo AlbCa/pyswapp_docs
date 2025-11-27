@@ -392,16 +392,17 @@ class SeismicStream:
 
             # new trace
             header = {
-                'delta': par.dt,
-                'npts': par.npts,
-                'delay': par.delay,
-                'sampling_rate': par.sampling_rate}
+                'delta': par.dt.item(),
+                'npts': par.npts.item(),
+                'delay': par.delay.item(),
+                'sampling_rate': par.sampling_rate.item()}
 
             trace = obspy.core.trace.Trace(data=amp, header=header)
             st_new.append(trace)
 
         # update
         self._pst = st_new
+        self.tapered_amps = par.tapered_amps.item()
 
     def update_pst(self,amps,sht,recs,par):
         """update stream data"""
@@ -467,7 +468,7 @@ class SeismicStream:
         self._st_shift = None
         self.fstep = 1
         #self.nstacks = 1
-        self.tapered = False
+        self.tapered_amps = 0
         self.trafo_type = None
         self.extraction_method = None
         self.dispersive_energy = None
@@ -1350,7 +1351,7 @@ class SeismicStream:
 
         return amps
 
-    def _fk_transform(self, taper_amps = True):
+    def _fk_transform(self):
         """Transformation to F-K domain"""
 
         if self._pst is None:
@@ -1359,8 +1360,9 @@ class SeismicStream:
             st = self._pst.copy()
 
         # amplitude data & processing
-        if taper_amps:
+        if self.tapered_amps == 0:
             amps = self._apply_taper(st = st, inplace = False)
+            self.tapered_amps = 1
         else:
             amps = self._amps(st=st)
 
@@ -2051,10 +2053,10 @@ class SeismicStream:
         elif type == 'SFR':
             fig = self._plotSFR(**kwargs)
             return fig
-        elif type == 'dispersionImage' or type == 'FV':
+        elif type == 'FV':
             fig = self._plotDispersionImage(**kwargs)
             return fig
-        elif type == 'dispersionImageComposite' or type == 'FVComposite':
+        elif type == 'FVComposite':
             fig = self._plotDispersionImageComposite(**kwargs)
             return fig
         elif type == 'geomShort':

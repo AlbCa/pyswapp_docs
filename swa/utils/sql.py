@@ -2,9 +2,10 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import math
+import io
 
 class StdevFunc:
-    """SQLITE aggregate stdev"""
+    """SQLITE aggregate stdev."""
     def __init__(self):
         self.M = 0.0
         self.S = 0.0
@@ -24,25 +25,26 @@ class StdevFunc:
         return math.sqrt(self.S / (self.k-1))
 
 class SQL:
-    """Handle an SQLite database"""
+    """Handle an SQLite database."""
     def __init__(self, database):
 
         self.database = database
 
     # %% Connection
     def get_connection(self):
+        """Create database connection."""
         con = sqlite3.connect(self.database)
         con.create_aggregate("STDEV", 1, StdevFunc)
         return con
 
     def to_sql(self, df, name, if_exists='fail', **kwargs):
-        """Write data stored in a DataFrame to a SQL database"""
+        """Write data stored in a DataFrame to a SQL database."""
 
         with self.get_connection() as con:
             df.to_sql(name=name, con=con, if_exists=if_exists, **kwargs)
 
     def read_sql(self, sql):
-        """Write SQL query or table into DataFrame"""
+        """Write SQL query or table into DataFrame."""
 
         with self.get_connection() as con:
             return pd.read_sql(sql,con=con)
@@ -74,69 +76,61 @@ class SQL:
         with self.get_connection() as con:
             con.execute(sql)
 
+    def array_to_blob(self, arr):
+        """Serialize ndarray to BLOB."""
+        out = io.BytesIO()
+        np.save(out, arr, allow_pickle=False)
+        return out.getvalue()
+
+    def blob_to_array(self, blob):
+        """Deserialize SQLite BLOB to numpy array."""
+        if isinstance(blob, (memoryview, bytearray)):
+            blob = bytes(blob)
+        out = io.BytesIO(blob)
+        return np.load(out, allow_pickle=False)
+
     def _create_tables(self):
-        """Create all database tables"""
+        """Initialize all database tables."""
 
-        # AMPS table
-        recs = self.get_table('recs')
-        columns = ['procset', 'wid', 'sin', 'rep']
-        types = ['TEXT', 'INT', 'INT', 'INT']
-        amps_columns = [f"rin{i}" for i in recs.rin.iloc]
-        amps_types = ['FLOAT'] * len(amps_columns)
-        all_columns = columns + amps_columns
-        all_types = types + amps_types
+        # amplitudes table
+        self._create_table('amplitudes',
+                           ['procset', 'wid', 'sin', 'rep', 'npts','dt','delay',
+                            'sampling_rate','tapered_amps','rin_data', 'amps_data'],
+                           ['TEXT', 'INT', 'INT', 'INT','INT',
+                            'FLOAT','FLOAT','FLOAT','INT','BLOB', 'BLOB'])
 
-        self._create_table('amps', all_columns, all_types)
-
-        # PAR table
-        self._create_table('par',
-                           ['procset', 'wid', 'sin', 'rep',
-                            'npts', 'dt', 'delay', 'sampling_rate'],
-                           ['TEXT', 'INT', 'INT', 'INT',
-                            'INT', 'FLOAT', 'FLOAT', 'FLOAT'])
-
-        # PID table
-        self._create_table('pid',
-                           ['procset', 'wid', 'sin', 'rep', 'rin'],
-                           ['TEXT', 'INT', 'INT', 'INT', 'INT'])
-
-        # FV table
+        # dispersive_energy table
         self._create_table(
-            'FV',
+            'dispersive_energy',
             ['procset', 'wid', 'sin', 'rep', 'method',
              'velocity', 'wavenumber', 'f_id', 'f_value', 're', 'im'],
             ['TEXT', 'INT', 'INT', 'INT', 'TEXT',
              'FLOAT', 'FLOAT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT']
         )
 
-        # PD table
-        columns = ['procset', 'calc', 'sin', 'rep', 'wid', 'fids', 'frequency']
-        types = ['TEXT', 'TEXT', 'INT', 'INT', 'INT', 'INT', 'FLOAT']
-        pd_columns = [f"pd{i}" for i in recs.rin.iloc[:-1]]
-        pd_types = ['FLOAT'] * len(pd_columns)
-        all_columns = columns + pd_columns
-        all_types = types + pd_types
-        self._create_table('pd', all_columns, all_types)
+        # phase_differences table
+        self._create_table('phase_differences',
+                           ['procset', 'calc', 'sin', 'rep', 'wid', 'f_id', 'f_value', 'pd_data'],
+                           ['TEXT', 'TEXT', 'INT', 'INT', 'INT', 'BLOB', 'BLOB', 'BLOB'])
 
-        # CURVE table
-        self._create_table('curve',
+        # curve table
+        self._create_table('curves',
                            ['procset', 'wid', 'sin', 'rep', 'xmid',
                             'method', 'dc_mode', 'frequency', 'velocity', 'error'],
                            ['TEXT', 'INT', 'INT', 'INT', 'FLOAT',
                             'TEXT', 'INT', 'FLOAT', 'FLOAT', 'FLOAT'])
 
-        # FILTER table
+        # filter table
         self._create_table('filter',
-                           ['procset', 'wid', 'sin', 'rep','key','xp','yp','type'],
+                           ['procset', 'wid', 'sin', 'rep','key','x_value','y_value','type'],
                            ['TEXT', 'INT', 'INT', 'INT', 'TEXT', 'FLOAT', 'FLOAT', 'TEXT'])
 
     def get_table(self,name):
-        """Return a table form the database as DataFrame"""
+        """Return a table form the database as DataFrame."""
         return self.read_sql("""SELECT * FROM %s""" % name)
 
     def drop_table(self, name):
-        """Drop table"""
-
+        """Drop table."""
         with self.get_connection() as con:
             con.execute(f"""DROP TABLE IF EXISTS {name}""")
 
@@ -145,13 +139,8 @@ class SQL:
         tables = self.get_tables()
         print("Tables in project: " + ", ".join(tables))
 
-    def _fmt(self, value):
-        """Helper to safely format values"""
-        with self.get_connection() as con:
-            return con.execute("SELECT quote(?)", (value,)).fetchone()[0]
-
     def check_data(self, table, params):
-        """Check if entry in database"""
+        """Check if entry exists already in database."""
 
         if table not in self.get_tables():
             return pd.DataFrame().empty
@@ -173,7 +162,7 @@ class SQL:
         return df.empty
 
     def delete_data(self, table, params):
-        """delete entry from database"""
+        """Delete entry from database."""
 
         with self.get_connection() as con:
 
@@ -192,17 +181,16 @@ class SQL:
                 pass
 
     def get_tables(self):
-        """Get all table names"""
+        """Get all table names."""
 
         with self.get_connection() as con:
             table_names = con.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
             table_list = [name[0] for name in table_names]
             return table_list
 
-    # %% Interaction with the geometry information
     # %% geometry information
     def read_geometry(self, geometry_file):
-        """Read geometry CSV file and populate geom, shots, and recs tables"""
+        """Read geometry CSV file and populate geometry, shots, and receivers tables."""
 
         # Read geometry file
         geom = pd.read_csv(geometry_file, delimiter=',', header=None,
@@ -215,7 +203,6 @@ class SQL:
         shots['shots'] = shots['shots'].str.split(';')
         shots = shots.explode('shots')
 
-        # Helper to append other columns
         def _append_shots_df(shots_df, geom_df, col_name):
             tmp = pd.DataFrame(geom_df.loc[geom_df.shots != '-1', [col_name]])
             tmp[col_name] = tmp[col_name].str.split(';')
@@ -234,29 +221,31 @@ class SQL:
         recs.insert(0, 'rin', np.arange(len(recs)) + 1)
         recs = recs.astype({'rin': int, 'station_id': int})
 
-        # Create tables if not exists
-        self._create_table('geom',
-                           ['station_id', 'x', 'y', 'z', 'geophone', 'shots', 'first_geophone', 'num_geophones'],
+        # Create tables
+        self._create_table('geometry',
+                           ['station_id', 'x', 'y', 'z', 'geophone',
+                            'shots', 'first_geophone', 'num_geophones'],
                            ['INT', 'FLOAT', 'FLOAT', 'FLOAT', 'INT', 'INT', 'INT', 'INT'])
-        self._create_table('shots', ['station_id', 'sin', 'rep', 'shots', 'first_geophone', 'num_geophones'],
+        self._create_table('shots', ['station_id', 'sin', 'rep',
+                                     'shots', 'first_geophone', 'num_geophones'],
                            ['INT', 'INT', 'INT', 'INT', 'INT', 'INT'])
-        self._create_table('recs', ['rin', 'station_id'], ['INT', 'INT'])
+        self._create_table('receivers', ['rin', 'station_id'], ['INT', 'INT'])
 
-        # Write to database
-        self.to_sql(geom, 'geom', if_exists='replace')
-        self.to_sql(shots, 'shots', if_exists='replace')
-        self.to_sql(recs, 'recs', if_exists='replace')
+        # write to database
+        self.to_sql(geom, 'geometry', if_exists='replace',index=False)
+        self.to_sql(shots, 'shots', if_exists='replace',index=False)
+        self.to_sql(recs, 'receivers', if_exists='replace',index=False)
 
         # create all tables
         self._create_tables()
 
     def get_geometry(self, sin, rep=1):
-        """Return source/receiver coordinates for one source location and shot index"""
+        """Return source/receiver coordinates for one source location and shot index."""
 
         if sin != '*':
             sql = f"""SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, 
                       g.x sx, g.y sy, g.z sz
-                      FROM geom g
+                      FROM geometry g
                       INNER JOIN shots s ON s.station_id == g.station_id
                       WHERE s.rep=={rep} AND s.sin=={sin}"""
             sht = self.read_sql(sql)
@@ -266,23 +255,23 @@ class SQL:
             rec = pd.DataFrame(columns=['rin', 'rx', 'ry', 'rz'])
             for rin in range(sht.fg.item(), sht.fg.item() + sht.ng.item()):
                 sql = f"""SELECT r.rin, g.x rx, g.y ry, g.z rz
-                          FROM geom g
-                          INNER JOIN recs r ON r.station_id == g.station_id
+                          FROM geometry g
+                          INNER JOIN receivers r ON r.station_id == g.station_id
                           WHERE r.rin=={rin}"""
                 rec = pd.concat([rec, self.read_sql(sql)])
 
         else:
             # Return all
             sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
-                     FROM geom g
+                     FROM geometry g
                      INNER JOIN shots s ON s.station_id == g.station_id"""
             sht = self.read_sql(sql)
             rec = pd.DataFrame(columns=['rin', 'rx', 'ry', 'rz'])
             for j in range(len(sht)):
                 for rin in range(sht.fg.iloc[j], sht.fg.iloc[j] + sht.ng.iloc[j]):
                     sql = f"""SELECT r.rin, g.x rx, g.y ry, g.z rz
-                              FROM geom g
-                              INNER JOIN recs r ON r.station_id == g.station_id
+                              FROM geometry g
+                              INNER JOIN receivers r ON r.station_id == g.station_id
                               WHERE r.rin=={rin}"""
                     rec = pd.concat([rec, self.read_sql(sql)])
             rec.drop_duplicates(inplace=True, ignore_index=True)
@@ -299,7 +288,7 @@ class SQL:
     # %% Interaction with settings
     def read_setting(self, settings):
         """Read settings and add to database"""
-        self.to_sql(settings, 'settings', if_exists='replace')
+        self.to_sql(settings, 'settings', if_exists='replace', index = False)
 
     def get_settings(self):
         """Return the settings DataFrame"""
@@ -308,20 +297,20 @@ class SQL:
     # %% Interact with seismic data
     def get_proc_labels(self):
         sql = """SELECT DISTINCT procset
-                 FROM amps"""
+                 FROM amplitudes"""
         return self.read_sql(sql)['procset'].values
 
     def get_trafo_labels(self,procset, use_windows = False):
 
-        if 'FV' in self.get_tables():
+        if 'dispersive_energy' in self.get_tables():
 
             if use_windows:
                 sql = """SELECT DISTINCT method
-                         FROM FV WHERE procset=='%s' AND wid != -1""" % procset
+                         FROM dispersive_energy WHERE procset=='%s' AND wid != -1""" % procset
                 labels = self.read_sql(sql)['method'].values
             else:
                 sql = """SELECT DISTINCT method
-                         FROM FV WHERE procset=='%s' AND wid == -1""" % procset
+                         FROM dispersive_energy WHERE procset=='%s' AND wid == -1""" % procset
                 labels = self.read_sql(sql)['method'].values
             return labels
 
@@ -330,120 +319,89 @@ class SQL:
     def duplicate_data(self,data, sin, rep, wid=-1):
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % 'tmp', 'wid': wid}
-        if self.check_data('amps', params):
+        if self.check_data('amplitudes', params):
             self.write_data(data, sin, rep, 'tmp', wid=wid)
 
-    def write_data(self, data, sin, rep, procset, wid = -1):
-        """write processed data to database"""
+    def write_data(self, data, sin, rep, procset, wid=-1):
+        """Write amplitude data in TX domain to SQL table 'amplitudes'."""
 
-        # TABLE amps
-        # table column names
-        recs = self.get_table('recs')
-        columns = ['procset', 'wid', 'sin', 'rep'] + [f"rin{i}" for i in recs.rin.iloc]
+        _, rec_geom = self.get_geometry(sin, rep)
+        stream = data
 
-        # create DataFrame
-        df = pd.DataFrame(columns=columns)
+        amps_data = self.array_to_blob(stream.st2amps().T)
 
-        # current data to be added to table
-        cur_sht_geom, cur_rec_geom = self.get_geometry(sin, rep)
+        rin = pd.DataFrame({'rx': stream.receiver}).merge(rec_geom[['rx', 'rin']], on='rx', how='left')['rin'].values
+        rin_data = self.array_to_blob(rin.astype(int))
 
-        cur_stream = data
-        cur_dt = cur_stream.dt  # sampling interval in s
-        cur_delay = cur_stream.delay  # pre trigger
-        cur_sampling_rate = cur_stream.sampling_rate # sampling rate
-        cur_rec = cur_stream.receiver  # receiver positions
-        cur_amps = cur_stream.st2amps()  # amplitudes (trace, amps)
-        cur_amps_transpose = cur_amps.transpose()
-        cur_npts = cur_stream.npts
+        df = pd.DataFrame([{
+            'procset': procset,
+            'wid': wid,
+            'sin': sin,
+            'rep': rep,
+            'npts': stream.npts,
+            'dt': stream.dt,
+            'delay': stream.delay,
+            'sampling_rate': stream.sampling_rate,
+            'tapered_amps': stream.tapered_amps,
+            'rin_data': rin_data,
+            'amps_data': amps_data
+        }])
 
-        rin = np.zeros(len(cur_rec))
-        for i, rec in enumerate(cur_rec):
-            rin[i] = cur_rec_geom['rin'].loc[cur_rec_geom['rx'] == rec].item()
+        # delete previous entry
+        params = {'sin': sin, 'rep': rep, 'procset': f"'{procset}'", 'wid': wid}
+        rows_exist = self.check_data('amplitudes', params)
 
-        amps_hdr = ['rin%d'%(int(i)) for i in rin]
+        if not rows_exist and procset != 'raw':
+            self.delete_data('amplitudes', params)
 
-        amps_df = pd.DataFrame(cur_amps_transpose, columns=amps_hdr)
-        amps_df.insert(0, 'procset', procset)
-        amps_df.insert(1, 'wid', wid)
-        amps_df.insert(2, 'sin', sin)
-        amps_df.insert(3, 'rep', rep)
+        self.to_sql(df, name='amplitudes', if_exists='append', index=False)
 
-        df = pd.concat([df, amps_df])
+    def read_data(self, sin, rep, procset='proc1', wid=-1):
+        """Read amplitude data from table 'amplitudes'."""
 
-        # TABLE par
-        # table column names
-        columns = ['procset', 'wid', 'sin', 'rep', 'npts', 'dt', 'delay', 'sampling_rate']
+        sql = f"""
+            SELECT *
+            FROM amplitudes
+            WHERE procset=='{procset}'
+              AND wid=={wid}
+              AND sin=={sin}
+              AND rep=={rep}
+        """
+        df = self.read_sql(sql)
 
-        # create DataFrame
-        par = [procset, wid, sin, rep, cur_npts, cur_dt, cur_delay, cur_sampling_rate]
-        par_df = pd.DataFrame([par],columns=columns)
+        if df.empty:
+            return None, None, None, None
 
-        # TABLE pid
-        # table column names
-        columns = ['procset', 'wid', 'sin', 'rep', 'rin']
+        rin = self.blob_to_array(df.iloc[0].rin_data)
+        amps = self.blob_to_array(df.iloc[0].amps_data)
 
-        # create DataFrame
-        pid = np.c_[np.full(len(rin),sin),
-                        np.full(len(rin),rep),
-                        rin]
-        pid_df = pd.DataFrame(pid,columns=columns[2:])
-        pid_df.insert(0,'procset',procset)
-        pid_df.insert(1, 'wid', wid)
+        rin_list = ",".join(map(str, rin.tolist()))
 
-        params = {'sin':sin, 'rep':rep, 'procset': "'%s'" % procset, 'wid':wid}
+        sql_recs = f"""
+            SELECT r.rin, g.x rx, g.y ry, g.z rz
+            FROM geometry g
+            INNER JOIN receivers r ON r.station_id = g.station_id
+            WHERE r.rin IN ({rin_list})
+            ORDER BY r.rin ASC
+        """
+        recs = self.read_sql(sql_recs)
 
-        # add tables to database or replace if exists
-        if self.check_data('amps',params):
-            self.to_sql(df,name = 'amps', if_exists = 'append', index = False)
-            self.to_sql(par_df, name='par', if_exists='append', index=False)
-            self.to_sql(pid_df, name='pid', if_exists='append', index=False)
-        else:
-            if procset != 'raw':
-                self.delete_data('amps',params)
-                self.delete_data('par', params)
-                self.delete_data('pid',params)
+        sql_sht = f"""
+            SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng,
+                   g.x sx, g.y sy, g.z sz
+            FROM geometry g
+            INNER JOIN shots s ON s.station_id = g.station_id
+            WHERE s.rep=={rep} AND s.sin=={sin}
+        """
+        sht = self.read_sql(sql_sht)
 
-                self.to_sql(df,name = 'amps', if_exists = 'append', index = False)
-                self.to_sql(par_df, name='par', if_exists='append', index=False)
-                self.to_sql(pid_df, name='pid', if_exists='append', index=False)
+        par = df[['npts', 'dt', 'delay', 'sampling_rate', 'tapered_amps']].iloc[[0]]
 
-    def read_data(self,sin,rep, procset = 'proc1', wid = -1):
-        """get processed data from database"""
-
-        sql = """SELECT r.rin, g.x rx, g.y ry, g.z rz
-                 FROM geom g
-                 INNER JOIN recs r ON r.station_id == g.station_id
-                 INNER JOIN pid p ON r.rin == p.rin
-                 WHERE p.procset=='%s' AND p.wid==%d AND p.sin==%d AND p.rep==%d""" % (procset,wid,sin,rep)
-        recs = self.read_sql(sql)
-
-        sql = """SELECT s.sin, s.rep, s.first_geophone fg, s.num_geophones ng, g.x sx, g.y sy, g.z sz
-                 FROM geom g
-                 INNER JOIN shots s ON s.station_id == g.station_id
-                 WHERE s.rep==%d AND s.sin==%d""" % (rep, sin)
-        sht = self.read_sql(sql)
-
-        sql = """SELECT procset, sin, rep, npts, dt, delay, sampling_rate
-                 FROM par
-                 WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d""" % (procset, wid, sin, rep)
-        par = self.read_sql(sql)
-
-        # check if query was successful and select data
-        if recs.empty or sht.empty or par.empty:
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-        amp_cols = [f'rin{i}' for i in recs.rin]
-        sql_amps = f"""
-            SELECT {', '.join(amp_cols)}
-            FROM amps
-            WHERE procset=='%s' AND wid==%d AND sin==%d AND rep==%d""" % (procset, wid, sin,rep)
-
-        amps = self.read_sql(sql_amps)
         return par, amps, recs, sht
 
     # %% FV data
     def write_FV(self, data, sin, rep, procset='proc1', wid=-1):
-        """write dispersion image data to database"""
+        """write dispersive energy data to SQL table 'dispersive_energy'"""
 
         cur_stream = data
         FV = cur_stream.dispersive_energy  # FV spectrum (vels, freq)
@@ -475,20 +433,19 @@ class SQL:
         df = pd.DataFrame(rows)
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % procset, 'wid': wid, 'method': "'%s'" % method}
-        if self.check_data('FV', params):
-            self.to_sql(df, name='FV', if_exists='append', index=False)
-        else:
-            self.delete_data('FV', params)
-            self.to_sql(df, name='FV', if_exists='append', index=False)
+        if not self.check_data('dispersive_energy', params):
+            self.delete_data('dispersive_energy', params)
+
+        self.to_sql(df, name='dispersive_energy', if_exists='append', index=False)
 
     def read_FV(self, sin, rep, procset='proc1', method='phaseshift', wid=-1):
-        """get data from table FV for a certain wave-field transformation method"""
+        """read dispersive energy data from SQL table 'dispersive_energy'"""
 
-        if 'FV' not in self.get_tables():
+        if 'dispersive_energy' not in self.get_tables():
             return None, None, None, None
 
         sql = f"""
-                    SELECT * FROM FV
+                    SELECT * FROM dispersive_energy
                     WHERE procset='{procset}'
                       AND wid={wid}
                       AND sin={sin}
@@ -512,15 +469,10 @@ class SQL:
 
         for v_idx, vel in enumerate(velocities):
             block = df[df.velocity == vel]
-            # sorted by f_id
             block = block.sort_values('f_id')
             FV[v_idx, :] = block['re'].values + 1j * block['im'].values
 
-        wavenumbers = (
-            df.groupby('velocity')['wavenumber']
-            .first()
-            .values
-        )
+        wavenumbers = df.groupby('velocity')['wavenumber'].first().values
 
         return velocities, wavenumbers, freq_vals, FV
 
@@ -528,49 +480,117 @@ class SQL:
         """return the window ids for a sin/rep pair"""
 
         sql = ("""SELECT DISTINCT wid
-                 FROM amps
+                 FROM amplitudes
                  WHERE procset=='%s' AND sin==%d AND rep==%d AND wid!=-1""" % (procset, sin, rep))
 
         df = self.read_sql(sql)
         return sorted(df["wid"].tolist()) if not df.empty else []
 
-    def write_pd(self, df, sin, rep, procset = 'proc1'):
-        """write phase differences to database"""
+    # def group_pd(self, sin, procset='proc1', by = 'AVG'):
+    #     """Group phase difference data in case of repeated shots"""
+    #
+    #     recs = self.get_table('recs')
+    #
+    #     # Static columns
+    #     base_cols = ["procset", "calc", "sin", "rep", "wid", "fids", "frequency"]
+    #
+    #     # Aggregated receiver columns
+    #     pd_cols = [
+    #         f"{by}(pd{rin}) AS pd{rin}"
+    #         for rin in recs.rin.iloc[:-1]
+    #     ]
+    #
+    #     select_cols = ", ".join(base_cols + pd_cols)
+    #
+    #     sql = f"""
+    #         SELECT {select_cols}
+    #         FROM phase_differences
+    #         WHERE procset = '{procset}' AND sin = {sin}
+    #         GROUP BY fids
+    #     """
+    #
+    #     df = self.read_sql(sql).replace({None: np.nan})
+    #     df["calc"] = by
+    #
+    #     params = {
+    #         "sin": sin,
+    #         "procset": f"'{procset}'",
+    #         "wid": -1,
+    #         "calc": f"'{by}'"
+    #     }
+    #
+    #     # Insert or replace
+    #     if not self.check_data('phase_differences, params):
+    #         self.delete_data('phase_differences, params)
+    #     self.to_sql(df, name='phase_differences, if_exists="append", index=False)
 
-        params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % procset, 'wid': -1, 'calc': "'NONE'"}
-        # append to table or replace if exists
-        if self.check_data('pd',params):
-            self.to_sql(df,name = 'pd', if_exists = 'append', index = False)
-        else:
-            self.delete_data('pd',params)
-            #if self.check_data('pd', params):
-            self.to_sql(df, name = 'pd', if_exists = 'append', index = False)
+    def write_pd(self, fids, freq, pd_data, sin, rep, procset='proc1'):
+        """Write phase-difference data to SQL table 'phase_differences'."""
 
-    def group_pd(self, sin, procset='proc1', by = 'AVG'):
-        """Group phase difference data in case of repeated shots"""
+        row = pd.DataFrame([{
+            "procset": procset,
+            "calc": "NONE",
+            "sin": sin,
+            "rep": rep,
+            "wid": -1,
+            "f_id": self.array_to_blob(np.asarray(fids)),
+            "f_value": self.array_to_blob(np.asarray(freq)),
+            "pd_data": self.array_to_blob(np.asarray(pd_data))
+        }])
 
-        recs = self.get_table('recs')
+        params = {
+            "sin": sin,
+            "rep": rep,
+            "procset": f"'{procset}'",
+            "wid": -1,
+            "calc": "'NONE'"
+        }
 
-        # Static columns
-        base_cols = ["procset", "calc", "sin", "rep", "wid", "fids", "frequency"]
+        if not self.check_data("phase_differences", params):
+            self.delete_data("phase_differences", params)
+        self.to_sql(row, name="phase_differences", if_exists="append", index=False)
 
-        # Aggregated receiver columns
-        pd_cols = [
-            f"{by}(pd{rin}) AS pd{rin}"
-            for rin in recs.rin.iloc[:-1]
-        ]
-
-        select_cols = ", ".join(base_cols + pd_cols)
+    def group_pd(self, sin, procset='proc1', by='AVG'):
+        """Group repeated measurements for a given sin. """
 
         sql = f"""
-            SELECT {select_cols}
-            FROM pd
-            WHERE procset = '{procset}' AND sin = {sin}
-            GROUP BY fids
+            SELECT procset, calc, sin, rep, wid, f_id, f_value, pd_data
+            FROM phase_differences
+            WHERE procset = '{procset}' AND sin = {sin} AND calc = 'NONE'
         """
+        df = self.read_sql(sql)
 
-        df = self.read_sql(sql).replace({None: np.nan})
-        df["calc"] = by
+        if df.empty:
+            return pd.DataFrame()
+
+        # Convert BLOBs → arrays
+        df["fids"] = df["f_id"].apply(self.blob_to_array)
+        df["freq"] = df["f_value"].apply(self.blob_to_array)
+        df["pd"] = df["pd_data"].apply(self.blob_to_array)
+
+        fids = df["fids"].iloc[0]
+        freq = df["freq"].iloc[0]
+
+        # Stack repeated pd arrays
+        stacked_pd = np.stack(df["pd"].to_list(), axis=0)
+
+        if by == "AVG":
+            agg = np.nanmean(stacked_pd, axis=0)
+        elif by == "STDEV":
+            agg = np.nanstd(stacked_pd, axis=0)
+        else:
+            raise ValueError(f"Unsupported aggregation: {by}")
+
+        row = pd.DataFrame([{
+            "procset": procset,
+            "calc": by,
+            "sin": sin,
+            "rep": df["rep"].iloc[0],
+            "wid": df["wid"].iloc[0],
+            "f_id": self.array_to_blob(fids),
+            "f_value": self.array_to_blob(freq),
+            "pd_data": self.array_to_blob(agg)
+        }])
 
         params = {
             "sin": sin,
@@ -579,29 +599,43 @@ class SQL:
             "calc": f"'{by}'"
         }
 
-        # Insert or replace
-        if self.check_data("pd", params):
-            self.to_sql(df, name="pd", if_exists="append", index=False)
-        else:
-            self.delete_data("pd", params)
-            self.to_sql(df, name="pd", if_exists="append", index=False)
+        if not self.check_data("phase_differences", params):
+            self.delete_data("phase_differences", params)
+        self.to_sql(row, name='phase_differences', if_exists="append", index=False)
+
+        return row
 
     def read_pd(self, sin, procset='proc1', calc='NONE', columns = '*'):
-        """get phase differences for a certain sin/procset pair"""
+        """Read phase-difference data from SQL table 'phase_differences'."""
 
         if not isinstance(columns, list):
             columns = list(columns)
 
         sql = (f"""SELECT {', '.join(columns)}
-                 FROM pd
+                 FROM phase_differences
                  WHERE procset=='%s'AND sin==%d AND calc=='%s'"""
                % (procset, sin, calc))
 
-        phase_diff = self.read_sql(sql).replace({None: np.nan})
-        return phase_diff
+        blob_df = self.read_sql(sql)
 
-    def write_curve(self, data, sin, rep, procset = 'proc1', wid = -1, xmid = 0):
-        """write dispersion curves to database"""
+        if blob_df.empty:
+            return None
+
+        return self.blob_to_array(blob_df.iloc[0].pd_data)
+
+    def read_f_from_pd(self, procset='proc1', calc='NONE'):
+
+        sql = f"""
+            SELECT f_value
+            FROM phase_differences
+            WHERE procset='{procset}' AND calc='{calc}'
+        """
+        df = self.read_sql(sql)
+        freq_arrays = [self.blob_to_array(b) for b in df["f_value"]]
+        return sorted(set(np.concatenate(freq_arrays)))
+
+    def write_curve(self, data, sin, rep, procset='proc1', wid=-1, xmid=0):
+        """Write dispersion curve data to SQL table 'curves'."""
 
         df = pd.DataFrame({'procset':procset,
                             'wid': wid,
@@ -614,38 +648,35 @@ class SQL:
                             'velocity': data['v'],
                             'error': data['err']})
 
-        #params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % procset, 'wid': wid, 'xmid': data['xmid']}
-        #if params is None:
-        params = {'procset': "'%s'" % procset, 'method': "'%s'" % data['method'], 'dc_mode': "%d" % data['dc_mode'],
-                  'sin': sin, 'rep': rep, 'wid': wid, 'xmid': xmid}
+        params = {
+            "procset": f"'{procset}'",
+            "method": f"'{data['method']}'",
+            "dc_mode": f"{data['dc_mode']}",
+            "sin": sin,
+            "rep": rep,
+            "wid": wid,
+            "xmid": xmid
+        }
 
-        # append to table or replace if exists
-        if self.check_data('curve',params):
-            self.to_sql(df,name = 'curve', if_exists = 'append', index = False)
-        else:
-            self.delete_data('curve',params)
-            self.to_sql(df, name = 'curve', if_exists = 'append', index = False)
+        if not self.check_data("curves", params):
+            self.delete_data("curves", params)
+        self.to_sql(df, name="curves", if_exists="append", index=False)
 
     def read_curve(self, params):
-        """get data from table curve"""
+        """Write dispersion curve data from SQL table 'curves'."""
 
         sql = """SELECT *
-                  FROM curve
+                  FROM curves
                   WHERE """
 
-        npar = len(params)
-        for i, key in enumerate(params.keys()):
-            if i < npar - 1:
-                sql += f"{key}=={params[key]} AND "
-            else:
-                sql += f"{key}=={params[key]}"
+        sql = "SELECT * FROM curves WHERE "
+        sql += " AND ".join(f"{k}=={v}" for k, v in params.items())
 
         curve = self.read_sql(sql)
         return curve
 
-
     def write_filter(self, points, sin, rep, key = 't', procset = 'proc1', wid = -1, type = 'FK'):
-        """write filter to data base"""
+        """Write filter to SQL table 'filter'."""
 
         x, y = zip(*sorted(points.items()))
 
@@ -654,14 +685,14 @@ class SQL:
                             'sin': sin,
                             'rep': rep,
                             'key': key,
-                           'xp':x,
-                           'yp':y,
+                           'x_value':x,
+                           'y_value':y,
                            'type':type})
 
         self.to_sql(df,name = 'filter', if_exists = 'append', index = False)
 
     def read_filter(self, params):
-        """get data from table filter"""
+        """Read filter from SQL table 'filter'."""
 
         sql = """SELECT *
                   FROM filter

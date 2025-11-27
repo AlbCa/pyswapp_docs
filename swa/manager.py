@@ -8,9 +8,6 @@ from .curves import CombineCurves
 from .qtapps import *
 
 # TODOs
-
-# TODO: check if windows exist and always use them?
-
 # TODO: optimization
 # TODO: do not save raw to db or instead of reading files read from db
 # TODO: test on field data
@@ -18,7 +15,6 @@ from .qtapps import *
 # TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
 # --> change warnings to logging!
 # TODO: documentation!!!
-# TODO: add stacking?
 
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
@@ -330,8 +326,9 @@ class BaseManager:
         """set processed data from database to current stream"""
 
         par, amps, recs, sht = self._get_data(sin, rep, procset=procset, wid=wid)
-        amps_ari = amps.values.transpose()
-        if not amps.empty:
+
+        if amps is not None:
+            amps_ari = amps.transpose()
             data.update_pst(amps_ari, sht, recs, par)
         # else:
         #     self.logger.error(f'No data for ({sin},{rep})')
@@ -768,7 +765,7 @@ class BaseManager:
         stream = copy.deepcopy(stream)
 
         method = kwargs.pop('method', 'phaseshift')
-        if type in ['dispersionImage', 'dispersionImageComposite']:
+        if type in ['FV','FVComposite']:
             self._set_FV(stream, sin, rep, procset=procset, method=method)
 
         wids = self._sql.get_wids(sin, rep, procset)
@@ -779,7 +776,7 @@ class BaseManager:
             tmp = copy.deepcopy(stream)
             self._set_data(tmp, sin, rep, procset, wid)
 
-            if type in ['dispersionImage','dispersionImageComposite']:
+            if type in ['FV','FVComposite']:
                 self._set_FV(tmp, sin, rep, procset=procset, method=method, wid=wid)
 
             fig = tmp.plot(type, **kwargs)
@@ -825,7 +822,10 @@ class BaseManager:
 
             # handle dc_mode as array; ensure colors array indexing works
             dc_modes = curve_data['dc_mode'].astype(int)
-            colors = color_map[dc_modes % len(color_map)]
+            if 'color' in kwargs:
+                colors = kwargs.pop('color','dodgerblue')
+            else:
+                colors = color_map[dc_modes % len(color_map)]
 
             dc = DispersionCurve()
             dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
@@ -973,9 +973,10 @@ class BaseManager:
 
         window_title = 'SWA - Interactive Figure Viewer'
 
-        if type in ['', 'seismogram', 'TX']:
-            DataSwitcher = DataSwitcherFilterSeis
-        elif type in ['dispersionImage', 'FV']:
+        # if type in ['', 'seismogram', 'TX']:
+        #     raise NotImplementedError()
+        #     #DataSwitcher = DataSwitcherFilterSeis
+        if type in ['dispersionImage', 'FV']:
             DataSwitcher = DataSwitcherPick
         elif type == 'FK':
             DataSwitcher = DataSwitcherFilterFK
@@ -2005,6 +2006,10 @@ class Tomo2DManager(BaseManager):
         if procset != self._procset:
             self.set_new_procset(procset)
 
+        _, recs_all = self._sql.get_geometry(sin='*')
+        all_receivers = recs_all.rx.values
+        receiver_index = {rec: i for i, rec in enumerate(all_receivers)}
+
         # compute the phase differences
         starttime = time.time()
         for sin in self.data.keys():
@@ -2015,13 +2020,10 @@ class Tomo2DManager(BaseManager):
                 sys.stdout.flush()
 
                 current_stream = self.select_data(sin=sin, rep=rep, inplace=False, verbose=False)
-                wids = self._sql.get_wids(sin, rep, procset)
 
-                recs = self._sql.get_table('recs')
-                columns = []
-                for i in recs.rin.iloc[:-1]:
-                    columns.append('pd%d' % i)
-                df = pd.DataFrame(columns=columns)
+                wids = self._sql.get_wids(sin, rep, procset)
+                if not wids:
+                    wids = [-1]
 
                 for wid in wids:
 
@@ -2030,26 +2032,12 @@ class Tomo2DManager(BaseManager):
 
                     cur_pd, cur_fids, cur_freq = tmp.compute_phasediffs()
                     cur_rec = tmp.receiver
+                    rin = np.array([receiver_index[r] for r in cur_rec[:-1]], dtype=int)
 
-                    cur_sht_geom, cur_rec_geom = self._sql.get_geometry(sin, rep)
-                    rin = np.zeros(len(cur_rec) - 1)
-                    for i, rec in enumerate(cur_rec[:-1]):
-                        rin[i] = cur_rec_geom['rin'].loc[cur_rec_geom['rx'] == rec].item()
-                    pd_hdr = ['pd%d' % i for i in rin]
+                    pd_full = np.zeros((len(cur_freq), len(all_receivers) - 1), dtype=cur_pd.dtype)
+                    pd_full[:, rin] = cur_pd
 
-                    df1 = pd.DataFrame({'procset': procset,
-                                        'calc': 'NONE',
-                                        'sin': sin,
-                                        'rep': rep,
-                                        'wid': -1,         # wid is -1 as reverse and forward sections are put together
-                                        'fids': cur_fids,
-                                        'frequency': cur_freq})
-                    df2 = pd.DataFrame(cur_pd, columns=pd_hdr)
-
-                    cur_df = pd.concat([df1, df2], axis=1)
-                    df = pd.concat([df, cur_df])
-
-                self._sql.write_pd(df, sin, rep, procset)
+                    self._sql.write_pd(cur_fids, cur_freq, pd_full, sin, rep, procset)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
@@ -2098,12 +2086,7 @@ class Tomo2DManager(BaseManager):
             self.compute_phasediff(procset)
 
         # frequencies
-        sql = (f"""SELECT DISTINCT frequency
-                   FROM pd
-                   WHERE procset=='%s' AND sin==%d AND calc=='%s'"""
-               % (procset, 1, 'NONE'))
-
-        freq = self._sql.read_sql(sql)['frequency'].values
+        freq = self._sql.read_f_from_pd(procset, calc='NONE')
 
         # geometry
         _, recs_all = self._sql.get_geometry(sin='*')
@@ -2135,13 +2118,11 @@ class Tomo2DManager(BaseManager):
 
                 offset = rx_all - shot_x
 
-                columns = ['pd%d' % i for i in range(1, len(offset) + 1)]
-
                 if len(self.data[sin]) > 1:
-                    pd_mean = self._sql.read_pd(sin, procset, calc='AVG', columns=columns)
-                    pd_std = self._sql.read_pd(sin, procset, calc='STDEV', columns=columns)
+                    pd_mean = self._sql.read_pd(sin, procset, calc='AVG')
+                    pd_std = self._sql.read_pd(sin, procset, calc='STDEV')
                 else:
-                    pd_mean = self._sql.read_pd(sin, procset, calc='NONE', columns=columns)
+                    pd_mean = self._sql.read_pd(sin, procset, calc='NONE')
                     pd_std = None
 
                 # FORWARD (offset > 0)
@@ -2150,13 +2131,13 @@ class Tomo2DManager(BaseManager):
                         (offset <= max_offset) &
                         (rx_all >= recs['rx'].iloc[:-1].min()) &
                         (rx_all <= recs['rx'].iloc[:-1].max()) &
-                        (pd_mean.iloc[jj, :] < 0)
+                        (pd_mean[jj, :] < 0)
                 )
                 fwd_idx = np.where(fwd_mask)[0]
 
                 for ii in fwd_idx:
                     A[iii, ii] = dx
-                    dphi[iii] = pd_mean.iloc[jj, ii]
+                    dphi[iii] = pd_mean[jj, ii]
 
                     # variance
                     if rel_err is not None:
@@ -2164,7 +2145,7 @@ class Tomo2DManager(BaseManager):
                     elif abs_err is not None:
                         variance[iii] = abs_err
                     elif pd_std is not None:
-                        variance[iii] = pd_std.iloc[jj, ii] ** 2
+                        variance[iii] = pd_std[jj, ii] ** 2
                     else:
                         variance[iii] = 1.0
 
@@ -2176,20 +2157,20 @@ class Tomo2DManager(BaseManager):
                         (offset >= -max_offset) &
                         (rx_all >= recs['rx'].iloc[:-1].min()) &
                         (rx_all <= recs['rx'].iloc[:-1].max()) &
-                        (pd_mean.iloc[jj, :] > 0)
+                        (pd_mean[jj, :] > 0)
                 )
                 rev_idx = np.where(rev_mask)[0]
 
                 for ii in rev_idx:
                     A[iii, ii] = -dx
-                    dphi[iii] = pd_mean.iloc[jj, ii]
+                    dphi[iii] = pd_mean[jj, ii]
 
                     if rel_err is not None:
                         variance[iii] = (rel_err * abs(dphi[iii]))
                     elif abs_err is not None:
                         variance[iii] = abs_err
                     elif pd_std is not None:
-                        variance[iii] = pd_std.iloc[jj, ii] ** 2
+                        variance[iii] = pd_std[jj, ii] ** 2
                     else:
                         variance[iii] = 1.0
 

@@ -509,7 +509,7 @@ class DCPickingInteractive(DraggablePoints):
                     x, y_data, marker="o", markersize=7,
                     markeredgecolor='k', color='white', linewidth=0
                 )
-                marker_style = dict(color="k", marker="o", markersize=3, linestyle='--', linewidth=0.8)
+                marker_style = dict(color="r", marker="o", markersize=3, linestyle='--', linewidth=0.8)
                 self._upper_bound_line, = self.ax.plot(x, y_lower, **marker_style)
                 self._lower_bound_line, = self.ax.plot(x, y_upper, **marker_style)
             else:

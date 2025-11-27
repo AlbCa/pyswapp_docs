@@ -230,15 +230,15 @@ class DataSwitcherBase(QWidget):
             'taper_length': self.kwargs.pop('taper_length', 5),
         }
 
-        # Taper initialization
-        self.taper = {}
-        if not self.is_grouped:
-            self.taper = {i: {'taper_amps': True} for i in range(len(self.all_labels))}
-        else:
-            self.taper = {
-                i: {j: {'taper_amps': True} for j in range(len(labels))}
-                for i, labels in enumerate(self.all_labels)
-            }
+        # # Taper initialization
+        # self.taper = {}
+        # if not self.is_grouped:
+        #     self.taper = {i: {'taper_amps': True} for i in range(len(self.all_labels))}
+        # else:
+        #     self.taper = {
+        #         i: {j: {'taper_amps': True} for j in range(len(labels))}
+        #         for i, labels in enumerate(self.all_labels)
+        #     }
 
         # Build UI
         try:
@@ -358,6 +358,12 @@ class DataSwitcherBase(QWidget):
             self.logger.error(f"_get_data failed: {err}")
             return None, None, None, None
 
+    def _get_curve(self, sin, rep, procset, wid=-1, method='phaseshift'):
+        """get the curve data"""
+        params = {'procset': "'%s'" % procset, 'method': "'%s'" % method,
+                  'sin': sin, 'rep': rep, 'wid': wid}
+        return self._sql.read_curve(params)
+
     def _get_FV(self, sin, rep, procset, wid=-1, method='phaseshift'):
         try:
             return self._sql.read_FV(sin, rep, procset=procset, wid=wid, method=method)
@@ -369,8 +375,9 @@ class DataSwitcherBase(QWidget):
         """set processed data from database to current stream"""
 
         par, amps, recs, sht = self._get_data(sin, rep, procset=procset, wid=wid)
-        amps_ari = amps.values.transpose()
-        if not amps.empty:
+
+        if amps is not None:
+            amps_ari = amps.transpose()
             data.update_pst(amps_ari, sht, recs, par)
             return True
         else:
@@ -386,7 +393,7 @@ class DataSwitcherBase(QWidget):
             return True
         else:
             _, amps, _, _ = self._get_data(sin, rep, procset=procset, wid=wid)
-            if not amps.empty:
+            if amps is not None:
                 self.logger.warning(f'Wave-field transformation not yet performed. Running {method} transformation.')
                 data.transform(method = method)
                 self._write_FV(data, sin, rep, procset, wid=wid)
@@ -546,14 +553,6 @@ class DataSwitcherBase(QWidget):
                 self.picks[self.current_index] = self.interactor.picks
             except Exception as err:
                 self.logger.error(f"Interaction setup failed: {err}")
-
-    def show_popup(self, text):
-
-        msg = QMessageBox()
-        msg.setWindowTitle("Information")
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec_()
 
     def add_combobox(self, sets, set, label=None, size = 90):
         """Add a combo box"""
@@ -858,13 +857,12 @@ class DataSwitcherPick(DataSwitcherBase):
             self.canvas.setFocus()
         except Exception as e:
             self.logger.exception(f"Interaction failed: {e}")
-            self.show_popup(f"Interaction failed:\n{e}")
 
 
     def show_popup(self):
         """Help popup with keyboard shortcuts."""
         text = "\n".join((
-            r'Press numbers 0–9: Set dispersion curve mode.',
+            r'Press numbers 0–9 to set dispersion curve mode index.',
             r'Press d: Delete boundary.',
             r'Press r: Reset picks.',
             r'Scroll: Adjust boundary tightness.'
@@ -951,7 +949,6 @@ class DataSwitcherPick(DataSwitcherBase):
 
         except Exception as e:
             self.logger.exception(f"Error writing picks to SQL: {e}")
-            self.show_popup(f"Error writing data:\n{e}")
 
     def set_method(self, method):
         """Change FV/dc processing method and refresh display."""
@@ -986,7 +983,7 @@ class DataSwitcherFilterSeis(DataSwitcherBase):
             points = self.points[self.current_index]
             label = self.labels[self.current_index]
 
-            self._sql.dublicate_data(self.stream, label[0], label[1], label[2])
+            self._sql.duplicate_data(self.stream, label[0], label[1], label[2])
 
             # filter data
             if points:
@@ -1032,6 +1029,12 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         """Build the FK filter interface."""
 
         try:
+            for label in self.labels:
+                stream = self.select_data(label[0], label[1])
+                for procset in self.procsets:
+                    _ = self._set_data(stream, label[0], label[1], procset, label[2])
+                    self._sql.duplicate_data(stream, label[0], label[1], label[2])
+
             self.layout = QVBoxLayout(self)
 
             # Toolbars
@@ -1204,11 +1207,10 @@ class DataSwitcherFilterFK(DataSwitcherBase):
                 ax = figure.axes[0]
                 points = self.points.get(self.current_index, {})
                 picks = self.picks.get(self.current_index, {})
-                taper = self.taper[self.current_index] if not self.is_grouped else self.taper[self.group_index][self.current_index]
 
                 self.interactor = self.interaction_class(
                     ax, points=points, data=self.stream,
-                    picks=picks, **self._interact_kwargs, **taper
+                    picks=picks, **self._interact_kwargs
                 )
 
                 self.points[self.current_index] = self.interactor.points
@@ -1227,29 +1229,17 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             points = self.points.get(self.current_index, {})
             label = self.labels[self.current_index]
 
-            self._sql.duplicate_data(self.stream, label[0], label[1], label[2])
-
             if points:
                 # Save filter points
                 self._sql.write_filter(points, label[0], label[1], self.interactor.key,
                                        procset=self.procset, wid=label[2], type='FK')
-
                 stream = self.interactor.filter()
                 self.points[self.current_index] = {}
 
-                # Disable taper after filtering
-                if not self.is_grouped:
-                    self.taper[self.current_index]['taper_amps'] = False
-                else:
-                    self.taper[self.group_index][self.current_index]['taper_amps'] = False
             else:
                 # Reset to original
                 stream = copy.deepcopy(self.stream)
                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
-                if not self.is_grouped:
-                    self.taper[self.current_index]['taper_amps'] = True
-                else:
-                    self.taper[self.group_index][self.current_index]['taper_amps'] = True
 
             # Overwrite in database
             self._write_data(stream, label[0], label[1], self.procset, label[2])
@@ -1369,8 +1359,8 @@ class CurveFilter(QWidget):
 
             self.ax.scatter(x[~mask], y[~mask], color="red", label=label2)
 
-        self.ax.set_title(f"Curves {self.current_index + 1}/{len(self.data)} "
-                          f"located at x = {self.keys[self.current_index]}", fontweight = 'bold')
+        self.ax.set_title(f"Curve {self.current_index + 1}/{len(self.data)} "
+                          f"located at x = {self.keys[self.current_index]}", fontweight = 'bold', loc = 'left')
         self.ax.legend()
         self.canvas.draw_idle()
 
