@@ -23,13 +23,14 @@ swam.set_procset_label(procset)
 
 #apply preprocessing step to the whole data (apply_to = 'all')
 processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
-swam.preprocess_streams(type='trim',by = 'offset',**processing_kwargs)
+swam.preprocess(type='trim',by = 'offset',**processing_kwargs)
 
 # remove zero amplitude data
 swam.preprocess(type='check_traces')
 
-swam.transform(type='phaseshift')
-swam.transform(type='fdbf')
+# wave-field transformation
+swam.transform(method='phaseshift')
+swam.transform(method='fdbf')
 
 # manual dc picking
 swam.gui_interact('FV')
@@ -38,7 +39,7 @@ swam.gui_interact('FV')
 swam.extract(method = 'max') # method here can be 'max' or the trafo method
 
 # automatic dc picking
-swam.extract(apply_to = 'all', method = 'MOPA', stopAtChi2 = 1, rel_err = 15/100,showResults = True)
+swam.extract(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
 
 # plot the corresponding pseudosections
 swam.plot('pseudosection',method = 'phaseshift')

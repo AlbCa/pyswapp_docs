@@ -17,11 +17,13 @@ swam = MASW2DManager(f'{prj_dir}/proc/5a_MASW2D',path2raw=path2raw,path2geom=pat
 
 # load processed data
 swam.set_procset_label(procset)
-swam.load_procset(procset)
+#swam.load_procset(procset)
 
 # dispersion curves
 # swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 5)
-# swam.extract_curves(method = 'MOPA', stopAtChi2 = 1, rel_err = 15/100)
+# swam.extract_curves(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
+#
+# swam.plot('pseudosection',method='MOPA')
 
 # set the data for the combination process and sort based on receiver spread mid point
 swam.prepare_CC(method = 'MOPA')
@@ -39,6 +41,9 @@ swam.combine(method = 'MOPA',**CC_kwargs)
 
 # process the dispersion curves if necessary
 # swam.process_CC(type='smooth', method='MOPA')
+
+# plot the combined curves as pseudosection
+swam.plot_CC(method='MOPA')
 
 # save the dispersion curves to a file
 swam.save_CC(method='MOPA')

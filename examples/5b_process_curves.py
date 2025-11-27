@@ -19,7 +19,7 @@ swam = MASW2DManager(f'{prj_dir}/proc/5b_MASW2D',path2raw=path2raw,path2geom=pat
 swam.set_procset_label(procset)
 
 # extract dispersion curves
-swam.extract(apply_to = 'all', method = 'MOPA', stopAtChi2 = 1, rel_err = 15/100)
+swam.extract(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
 
 fig,ax = plt.subplots(2,1, figsize = (8,8))
 
