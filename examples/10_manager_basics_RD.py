@@ -30,7 +30,7 @@ procset = 'test' # processing set label
 swam.set_procset_label(procset)
 
 # select data
-swam.select_data(sin=20, rep=1, inplace=True)
+swam.select_data(sin=26, rep=3, inplace=True)
 
 # removal of the last two channels
 swam.preprocess(attr='trim',by = 'remove', ids = np.arange(46,48))

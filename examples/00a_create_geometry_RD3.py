@@ -9,10 +9,10 @@ matplotlib.use('Qt5Agg')
 
 # %% Create and read the geometry.csv
 # directories
-prj_dir = '../data/real_data/Moriago'
-path2raw = os.path.join(prj_dir,'ALL')
-path2geom = f'{prj_dir}/geometry_test.csv'
-ext = '.sg2' # shot file extension
+prj_dir = '../data/real_data/Asolo'
+path2raw = os.path.join(prj_dir,'L1')
+path2geom = f'{prj_dir}/geometry_test_v4.csv'
+ext = '.dat' # shot file extension
 
 # paths to the shot files
 path2shts = [f.path for f in os.scandir(path2raw) if f.is_file()]

@@ -1,9 +1,11 @@
 from swa import *
+import matplotlib
+matplotlib.use('Qt5Agg')
 
 # %% Base operations with Manager classes
 
 # directories
-prj_dir = '../data/syn_data'
+prj_dir = 'data/syn_data'    # I have changed the relative path to make the script work in the "swa" folder
 path2raw = os.path.join(prj_dir,'raw')
 path2geom = f'{prj_dir}/geometry_v2.csv'
 ext = '.sgy' # shot file extension
@@ -50,10 +52,10 @@ swam.preprocess(attr='check_traces')
 swam.load_procset(procset)
 
 # perform wavefield transformation based on the phaseshift method
-#swam.transform(method = 'phaseshift')
+swam.transform(method = 'phaseshift')
 
 # perform wavefield transformation based on the phaseshift method
-#swam.transform(method = 'fdbf')
+swam.transform(method = 'fdbf')
 
 # plot the dispersion images
 fig,ax = plt.subplots(1,2,figsize=(10,5))

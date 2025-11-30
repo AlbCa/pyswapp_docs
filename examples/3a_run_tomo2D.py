@@ -2,7 +2,7 @@ from swa import *
 
 # %% TOMOGRAPHIC LIKE APPROACH
 # directories
-prj_dir = '../data/syn_data'
+prj_dir = 'data/syn_data'
 path2raw = os.path.join(prj_dir,'raw')
 path2geom = f'{prj_dir}/geometry_v2.csv'
 ext = '.sgy' # shot file extension

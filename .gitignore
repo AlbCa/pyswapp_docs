@@ -3,3 +3,9 @@ swa/utils/__pycache__/*.pyc
 examples/figures/*
 data/proc/*
 data/syn_data/proc/*
+data/real_data/Cavezzo/*
+data/real_data/Moriago/*
+data/real_data/Mannsworth/*
+data/real_data/Asolo/*
+
+

@@ -5,7 +5,6 @@ prj_root = os.path.abspath(os.path.join(nb_dir, "../")) # set swa path
 sys.path.append(prj_root) # add path
 from swa import *
 import matplotlib
-import matplotlib.pyplot as plt
 matplotlib.use('Qt5Agg')
 
 # %% Base operations with Manager classes
@@ -21,7 +20,7 @@ settings = create_settings(fmin=5, fmax=40,                  # frequency range
                          vmin=100, vmax=1200, velstep=1)     # testing phase velocity range and step
 
 # manager
-swam = BaseManager(f'{prj_dir}/proc/10_manager_basics',
+swam = BaseManager(f'{prj_dir}/proc/10_manager_basics_v2',
                    path2raw=path2raw,
                    path2geom=path2geom,
                    settings=settings
@@ -62,7 +61,7 @@ swam.set_procset_label(procset)
 # %% Plotting
 
 # select data
-swam.select_data(sin=26, rep=2, inplace=True)
+swam.select_data(sin=1, rep=1, inplace=True)
 
 # plot the survey geometry
 swam.plot('geometry')
@@ -98,6 +97,6 @@ swam.plot('dispersionImage', method = 'phaseshift') #, axes = ax[0])
 plt.tight_layout()
 plt.show()
 
-swam.preprocess(attr='filter', by = 'FK', fname = 'C:/Users/Ilaria/Documents/GitHub/swa/data/real_data/Moriago/dummy_filter_new2.txt')
+swam.preprocess(attr='filter', by = 'FK', manual = 'True') #fname = 'C:/Users/Ilaria/Documents/GitHub/swa/data/real_data/Moriago/dummy_filter_new2.txt')
 # plot the seismogram
 swam.plot('seismogram')

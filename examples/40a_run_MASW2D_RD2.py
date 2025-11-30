@@ -25,7 +25,7 @@ settings = create_settings(fmin=10, fmax=30,                  # frequency range
 swam = MASW2DManager(f'{prj_dir}/proc/40a_MASW2D_L1',path2raw=path2raw,path2geom=path2geom, settings=settings)
 
 # load data from database based on procset label
-swam.load_procset('raw')
+#swam.load_procset('raw')
 
 # set a new procset label
 swam.set_procset_label(procset)
@@ -43,13 +43,13 @@ swam.preprocess_streams(attr='check_traces', apply_to = 'all')
 # transform data for all files (apply_to = 'all')
 swam.transform_streams(attr='phaseshift', apply_to = 'all')
 
-# extract dispersion curves automatically for all files (apply_to = 'all')
-swam.extract_curves(apply_to = 'all', pck_mode='auto', auto_method = 'max')
-# --> method to obtain dc is "phaseshift_max" (= transformation method + auto_method)
+# # extract dispersion curves automatically for all files (apply_to = 'all')
+# swam.extract_curves(apply_to = 'all', pck_mode='auto', auto_method = 'max')
+# # --> method to obtain dc is "phaseshift_max" (= transformation method + auto_method)
 
-# # # extract dispersion curves manually for selected data (apply_to = 'cur')
-# swam.extract_curves(apply_to = 'all', pck_mode='manual')
-# # --> method to obtain dc is "phaseshift" (= transformation method + NO auto_method)
+# # extract dispersion curves manually for selected data (apply_to = 'cur')
+swam.extract_curves(apply_to = 'all', pck_mode='manual')
+# --> method to obtain dc is "phaseshift" (= transformation method + NO auto_method)
 
 # # process dispersion curve of selected data (apply_to = 'cur')
 #processing_kwargs = {'kernel_size':3} # arguments for the processing
@@ -57,7 +57,8 @@ swam.extract_curves(apply_to = 'all', pck_mode='auto', auto_method = 'max')
 #swam.plot_curves(apply_to = 'cur', method='phaseshift_max')
 
 # plot the pseudosection
-swam.plot_pseusodsection(method='phaseshift_max',cmap='jet')
+#swam.plot_pseusodsection(method='phaseshift_max',cmap='jet')
+swam.plot_pseusodsection(method='phaseshift',cmap='jet')
 
 # # save the dispersion curves
 # swam.save_curves(method='phaseshift_max', format = 'csv')
