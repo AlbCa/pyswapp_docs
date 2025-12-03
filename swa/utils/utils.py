@@ -9,6 +9,8 @@ import pandas as pd
 import logging
 import shutil
 
+from scipy import interpolate
+
 supported_extensions = ['.sg2','.dat','.syn','.sgy','.syn']
 
 # %% Logging
@@ -148,8 +150,8 @@ def filter_df2dict(df):
     top = df[df['key'] == 't']
     bot = df[df['key'] == 'b']
 
-    points_top = dict(zip(top['xp'], top['yp']))
-    points_bot = dict(zip(bot['xp'], bot['yp']))
+    points_top = dict(zip(top['x_value'], top['y_value']))
+    points_bot = dict(zip(bot['x_value'], bot['y_value']))
 
     return points_top, points_bot
 
@@ -447,3 +449,16 @@ def nextpow2(A):
         count+=1
     return count,p
 
+# %% Interpolation
+def interp(x,y,xx,yerr = None, kind='cubic',**kwargs):
+    """interpolate data"""
+
+    f = interpolate.interp1d(x, y, kind=kind, **kwargs)
+    yy = f(xx)
+
+    if yerr is not None:
+        ferr = interpolate.interp1d(x, yerr, kind=kind, **kwargs)
+        yyerr = ferr(xx)
+        return xx,yy,yyerr
+    else:
+        return xx, yy, None
