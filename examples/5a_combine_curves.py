@@ -20,27 +20,33 @@ swam.set_procset_label(procset)
 #swam.load_procset(procset)
 
 # dispersion curves
-# swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 5)
-# swam.extract_curves(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
-#
-# swam.plot('pseudosection',method='MOPA')
+swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 5)
+swam.extract_curves(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
 
-# set the data for the combination process and sort based on receiver spread mid point
-swam.prepare_CC(method = 'MOPA')
+swam.plot('pseudosection',method='MOPA')
 
-# run some processes from the CC class, e.g., manual filtering of the sorted dispersion curves
-swam.filter_CC()
-
-# combine the dispersion curves
-CC_kwargs = {'mode' : 0,    # mode 0 = binning; mode 1 = resampling to same frequency range and mean/std calculation
+# combine the dispersion curves based on binning
+CC_kwargs = {'combination_method' : 'binning',
             'a':8,            # parameter controlling the wavelength interval
             'xlim' : [5,80],  # xlimit for plotting
             'ylim' : [50,400],# ylimit for plotting
             'show': False}      # show the combined dc
-swam.combine(method = 'MOPA',**CC_kwargs)
+
+# # combine the dispersion curves based on resampling
+# CC_kwargs = {'combination_method' : 'resampling',
+#             'pmin':5,            # minimum frequency for common frequency range
+#             'pmax':50,           # maximum frequency for common frequency range
+#             'pn': 30,            # number of new sampling points
+#             'pspace': 'log',     # log or linear scale
+#             'kind': 'cubic',     # kind of interpolation
+#             'xlim' : [5,80],  # xlimit for plotting
+#             'ylim' : [50,400],# ylimit for plotting
+#             'show': False}      # show the combined dc
+
+swam.combine(method = 'MOPA', filter = False, **CC_kwargs)
 
 # process the dispersion curves if necessary
-# swam.process_CC(type='smooth', method='MOPA')
+swam.process_CC(type='smooth', method='MOPA')
 
 # plot the combined curves as pseudosection
 swam.plot_CC(method='MOPA')

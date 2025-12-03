@@ -1,127 +1,30 @@
-import sys
-from .qtapps import *
-
-import collections
+from .utils.utils import *
+from .utils.physics import *
+from .curve import DispersionCurve
 import warnings
 
+import matplotlib.pyplot as plt
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class CombineCurves:
     """combine dispersion curves and perform simple statistics"""
 
-    def __init__(self):
+    def __init__(self, data):
 
-        self.data = {}
-        self.dc_mean = None
+        self.data = data
 
-    def append(self,curve, xmid, source=None,color = 'b'):
-
-        if xmid not in self.data.keys():
-            self.data[xmid] = {}
-            i = 0
-        else:
-            ids = [key for key in self.data[xmid].keys()]
-
-            i = np.max(ids)+1
-
-        self.data[xmid][i] = {'data': curve,
-                                         'data_filt': curve,
-                                         'label': source,
-                                         'color': color}
-
-    @staticmethod
-    def _plot_lambda_intervals(lam_min = 0.1, lam_max = 180,a_range = range(2,8)):
-        """plot wavelength intervals (Olafsdottir, 2018)"""
-
-        qmin = int(np.round((np.log(lam_min) / np.log(2) + 1 / 6) * 3 - 1))
-
-        fig, ax = plt.subplots(figsize = (6,3))
-
-        for i,a in enumerate(a_range):
-
-            lam_eq = []
-            lam_lo = []
-            lam_up = []
-
-            a_vec = []
-            lam_max_bound = 0
-            q = qmin
-
-            while lam_max_bound <= lam_max:
-
-                lam_eqi = 2 ** ((q - 1) / a)
-                lam_min_bound = lam_eqi * (2 ** (-1 / (2 * a)))
-                lam_max_bound = lam_eqi * (2 ** (1 / (2 * a)))
-
-                lam_eq.append(lam_eqi)
-                lam_lo.append(lam_min_bound)
-                lam_up.append(lam_max_bound)
-                a_vec.append(a)
-
-                q+=1
-
-            ax.plot(lam_up,a_vec, marker = '|',
-                    color = 'k',zorder = 1)
-
-            ax.scatter(lam_eq,a_vec, marker = 'o',
-                    color = 'r',s=10,zorder = 2)
-
-        ax.set_xlabel('wavelength (m)')
-        ax.set_ylabel('a')
-        ax.grid(linestyle = 'dotted')
-        ax.invert_yaxis()
-        ax.set_title('Wavelength intervals', fontweight = 'bold')
-        plt.tight_layout()
-        plt.show()
-
-    @staticmethod
-    def _dc2vec(data_dict):
-        """convert dict containing all dcs to vector"""
-
-        # Remove 'cmb' if present
-        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
-
-        lam_list = []
-        vr_list = []
-
-        for entry in data_dict.values():
-            data = entry['data_filt'].data
-            lam = np.asarray(data.lam)
-            vr = np.asarray(data.vr)
-
-            # Ensure matching shapes and exclude invalid/masked/zero values
-            valid = (lam > 0) & np.isfinite(vr)
-            lam_list.append(lam[valid])
-            vr_list.append(vr[valid])
-
-        if lam_list:
-            lam_vec = np.concatenate(lam_list).reshape(-1, 1)
-            vr_vec = np.concatenate(vr_list).reshape(-1, 1)
-        else:
-            lam_vec = np.empty((0, 1))
-            vr_vec = np.empty((0, 1))
-
-        return lam_vec, vr_vec
-
-    @staticmethod
-    def _binning(lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None):
+    def _binning(self, lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None):
         """combination of dispersion curves from SW measurements (Olafsdottir, 2018)"""
-
-        # %% binning process
-        # a ... log_a spaced intervals
-        # qmin ... start wavelength of first wavelength interval
-        # qmax ... start wavelength of last wavelength interval
-        # lam_eq ... reference point of the qth interval
-        # lam_lo, lam_up ... lower and upper bounds
-
-        #minvelerr = kwargs.pop('minvelerr', None) # minimum error (in m/s)
 
         # define wavelength intervals
         lam_vec = lam_vec.flatten()
         vel_vec = vel_vec.flatten()
 
-        qmin = int(np.round((np.log2(lam_min) + 1 / (2 * a)) * a - 1))
+        try:
+            qmin = int(np.round((np.log2(lam_min) + 1 / (2 * a)) * a - 1))
+        except ValueError:
+            qmin = int(np.round((np.log2(1) + 1 / (2 * a)) * a - 1))
 
         lam_eq, vel_mean, vel_std = [], [], []
 
@@ -154,107 +57,72 @@ class CombineCurves:
 
         return f_mean, vel_mean, vel_std
 
-    def _resample(self,data_dict, pmin = -np.inf, pmax = np.inf, pn = 30, **kwargs):
+    def _resample(self, data, pmin = 1, pmax = 100, pn = 30,pspace = 'log', kind = 'cubic'):
         """resample all curves"""
 
-        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
+        if pspace == 'log':
+            parx_new = np.geomspace(pmin, pmax, pn)
+        else:
+            parx_new = np.linspace(pmin, pmax, pn)
 
-        # Determine common min/max
-        for v in data_dict.values():
-            data = v['data_filt'].data
-            pmin = max(pmin, np.min(data[kwargs.get('param', 'f')]))
-            pmax = min(pmax, np.max(data[kwargs.get('param', 'f')]))
+        resampled_list = []
 
-        for v in data_dict.values():
-            v['data_filt'].resample(
-                pmin=pmin,
-                pmax=pmax,
-                pn=pn,
-                inplace=True,
-                **kwargs
-            )
+        for (sin, rep), group in data.groupby(['sin', 'rep']):
+            group = group.sort_values('frequency')
 
-    def _compute_mean(self,data_dict):
+            # Interpolate velocity and error
+            parx_new, pary_new, err_new = interp(group['frequency'],
+                                                 group['velocity'],
+                                                 parx_new, yerr=group['error'],
+                                                 kind=kind,fill_value="extrapolate")
+
+            resampled_list.append(pd.DataFrame({
+                                'sin': sin,
+                                'rep': rep,
+                                'frequency': parx_new,
+                                'velocity': pary_new,
+                                'error': err_new}))
+
+        return pd.concat(resampled_list, ignore_index=True)
+
+    def _resample_and_average(self,data,**kwargs):
         """compute the mean of all curves"""
 
-        data_dict = {k: v for k, v in data_dict.items() if k != 'cmb'}
+        data_resampled = self._resample(data, **kwargs)
 
-        all_data = [v['data_filt'].data for v in data_dict.values()]
-        df = pd.concat(all_data)
-        grouped = df.groupby('f')
+        stats = (data_resampled.groupby("frequency").agg(velocity_mean=("velocity", "mean"),
+                                               velocity_std=("velocity", "std")).reset_index())
 
-        return grouped.mean().index.values, grouped['vr'].mean().values, grouped['vr'].std().fillna(0).values
+        return stats['frequency'].to_numpy(), stats['velocity_mean'].to_numpy(), stats['velocity_std'].to_numpy()
 
-    def filter(self):
-        """filter data points at several x-locations if necessary"""
-
-        data = self.data
-
-        data = collections.OrderedDict(sorted(data.items()))
-
-        self.filter_xmid(data)
-
-    def filter_xmid(self, data):
-        """filter data points at one x-locations if necessary"""
-
-        app = QApplication(sys.argv)
-
-        w = CurveFilter(data)
-        w.setWindowTitle("Dispersion curve filtering")
-        w.resize(800, 600)
-        w.show()
-
-        def handle_about_to_quit():
-            w.remove_points()
-
-        app.aboutToQuit.connect(handle_about_to_quit)
-        app.exec()
-
-        data = w.data
-
-        self.data = data
-
-    def combine_all(self, **kwargs):
-        """combine curves for all xmid locations"""
-
-        data = self.data
-
-        data = collections.OrderedDict(sorted(data.items()))
-
-        for id,key in enumerate(data.keys()):
-            self.combination(key,**kwargs)
-
-    def combination(self, key, mode = 0, axes = None, show=True, outfile=None, **kwargs):
+    def combination(self, combination_method = 'binning', axes = None, show=True, **kwargs):
         """run combination of dispersion curves"""
 
         data = self.data
+        x, y = data['frequency'].to_numpy(), data['velocity'].to_numpy()
 
         xlim = kwargs.pop('xlim',[0,80])
         ylim = kwargs.pop('ylim',[0,800])
 
-        if mode == 0:
-            lam_vec, vel_vec = self._dc2vec(data[key])
+        # binning
+        if combination_method == 'binning':
+            lam_vec, vel_vec = wavelength(x,y), y
             lam_min, lam_max = np.min(lam_vec),np.max(lam_vec)
             f_mean, vel_mean, vel_std = self._binning(lam_vec, vel_vec,
                                                     lam_min=lam_min,
                                                     lam_max=lam_max,
                                                     a = kwargs.pop('a',4))
-        elif mode == 1:
-            self._resample(data[key],
-                           pmin = kwargs.pop('pmin',-np.inf),
-                           pmax = kwargs.pop('pmax',np.inf),
+        # resampling
+        else:
+            f_mean, vel_mean, vel_std = self._resample_and_average(data,
+                           pmin = kwargs.pop('pmin',1),
+                           pmax = kwargs.pop('pmax',50),
                            pn = kwargs.pop('pn',30),
                            pspace = kwargs.pop('pspace','log'),
-                           param = kwargs.pop('param','f'),
                            kind = kwargs.pop('kind','cubic'))
-            f_mean, vel_mean, vel_std = self._compute_mean(data[key])
-
-        else:
-            f_mean, vel_mean, vel_std = self._compute_mean(data[key])
 
         dc_mean = DispersionCurve()
         dc_mean.init_data(freq=f_mean,vel=vel_mean,err=vel_std)
-        self.data[key]['cmb'] = dc_mean
 
         # plot
         if show:
@@ -264,13 +132,7 @@ class CombineCurves:
                 ax = axes
                 fig = ax.figure
 
-            for i in data[key].keys():
-                if i != 'cmb':
-                    dc = data[key][i]['data_filt']
-                    dc.plot(axes=ax,
-                                 color=data[key][i]['color'],
-                                 label=None,
-                                 show_orig=False)
+            ax.scatter(x, y, color="royalblue", s=20, label = 'data')
 
             ax.errorbar(x=f_mean, y=vel_mean, yerr = vel_std, capsize = 2,capthick = 1.5,
                             color='k', elinewidth=1.5, label=r'$s_{v_r}$',linewidth = 0)
@@ -282,16 +144,10 @@ class CombineCurves:
             ax.set_xlim(xlim)
             ax.set_ylim(ylim)
 
-            if axes is not None:
-                return ax
-
-            plt.tight_layout()
-
-            if outfile:
-                fig.savefig(outfile)
+            ax.set_xlabel('frequency (Hz)')
+            ax.set_ylabel('phase velocity (m/s)')
+            ax.grid(True, linestyle=':')
 
             plt.show()
 
-
-
-
+        return dc_mean

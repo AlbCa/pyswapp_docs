@@ -1,6 +1,7 @@
 
 import sys
 import time
+import collections
 
 from .utils import *
 from .stream import SeismicStream
@@ -17,7 +18,7 @@ from .qtapps import *
 # TODO: documentation!!!
 
 class BaseManager:
-    def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db',**kwargs):
+    def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db', overwrite = False, **kwargs):
         """
         Base manager class for surface wave analysis
 
@@ -484,7 +485,6 @@ class BaseManager:
 
             self._write_data(tmp_stream, sin, rep, procset, wid)
 
-
     def _transform(self, method='phaseshift', procset=None, use_windows=True, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
 
@@ -544,9 +544,9 @@ class BaseManager:
                     'xmid': xmid,
                     'method': stream.extraction_method,
                     'dc_mode': dc_mode,
-                    'f': stream.picks[pck_mode][dc_mode]['f'],
-                    'v': stream.picks[pck_mode][dc_mode]['v'],
-                    'err': np.zeros(len(stream.picks[pck_mode][dc_mode]['v']))}
+                    'frequency': stream.picks[pck_mode][dc_mode]['frequency'],
+                    'velocity': stream.picks[pck_mode][dc_mode]['velocity'],
+                    'error': np.zeros(len(stream.picks[pck_mode][dc_mode]['velocity']))}
 
                 self._sql.write_curve(dc, sin, rep, procset, wid, xmid)
 
@@ -609,9 +609,9 @@ class BaseManager:
                 'xmid': xmid,
                 'method': method,
                 'dc_mode': params['dc_mode'],
-                'f': dc_obj.frequency,
-                'v': dc_obj.velocity,
-                'err': dc_obj.error
+                'frequency': dc_obj.frequency,
+                'velocity': dc_obj.velocity,
+                'error': dc_obj.error
             }
 
             self._sql.write_curve(
@@ -635,6 +635,10 @@ class BaseManager:
             'dx': abs(receiver[0] - receiver[1])
         }
         return stream_kwargs
+
+    def process_curves(self, type, procset=None, method = None,
+                      dc_mode=0, use_windows=True, **kwargs):
+        self.process_curve(type, procset, method, dc_mode, use_windows, **kwargs)
 
     def process_curve(self, type, procset=None, method = None,
                       dc_mode=0, use_windows=True, **kwargs):
@@ -882,7 +886,7 @@ class BaseManager:
                 vmin=vmin,
                 vmax=vmax,
                 cmap=cmap,
-                y_value='f',
+                y_value='frequency',
                 **kwargs
             )
 
@@ -1094,7 +1098,8 @@ class MASW2DManager(BaseManager):
         """
 
         super().__init__(prjdir, path2raw, path2geom, settings, database,**kwargs)
-        self.CC = None
+        self.dc_locations = None
+        self.dcs_per_location = None
 
     def plot_streams(self, type='seismogram', procset = None, apply_to = 'all', use_windows=True, **kwargs):
         """
@@ -1549,66 +1554,7 @@ class MASW2DManager(BaseManager):
         self.set_loadset(procset)
 
     # %% curve combination
-    def prepare_CC(self, procset = None, method = None,
-                   dc_mode = 0, use_windows=True, **kwargs):
-        """
-        Prepare data for dispersion curve combination
-
-        Parameters
-        ----------
-        procset : str, identifier to set on which dataset the processing should be applied to
-        method : str, method used to obtain dispersion curves
-        dc_mode : int, default 0, mode of propagation
-        use_windows : bool, default False, whether to apply the processing to windows
-
-        """
-
-        if procset is None:
-            procset = self._procset
-
-        color = kwargs.pop('color', 'dodgerblue')
-
-        params = {'procset': "'%s'" % procset, 'dc_mode': dc_mode}
-        if method:
-            params['method'] = "'%s'" % method
-
-        self.CC = CombineCurves()  # location where combined dcs shall be stored
-
-        for sin in self.data.keys():
-            for rep in self.data[sin].keys():
-
-                params['sin'] = sin
-                params['rep'] = rep
-
-                wids = self._sql.get_wids(sin, rep, procset)
-                if use_windows:
-                    for wid in wids or []:
-                        params['wid'] = wid
-
-                        curve_data = self._sql.read_curve(params)
-
-                        dc = DispersionCurve()
-                        dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-
-                        for xmid in curve_data['xmid'].unique():
-                            self.CC.append(dc, xmid, source=None, color=color)
-
-                else:
-                    params['wid'] = -1
-
-                    curve_data = self._sql.read_curve(params)
-
-                    dc = DispersionCurve()
-                    dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
-                    self.CC.append(dc, curve_data['xmid'].unique()[0], source=None, color=color)
-
-    def filter_CC(self):
-        """Manually filter multiple dispersion curves"""
-
-        self.CC.filter()
-
-    def combine(self, procset = None, method = None, dc_mode = 0,
-                use_windows=True, **kwargs):
+    def combine(self, procset = None, method = None, filter = True, dc_mode = 0, use_windows=True, **kwargs):
         """
         Combine dispersion curves with same receiver spread location
 
@@ -1616,38 +1562,64 @@ class MASW2DManager(BaseManager):
         ----------
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curves
+        filter:, bool, manually filter curves if True
         dc_mode : int, default 0, mode of propagation
         use_windows : bool, default False, whether to apply the processing to windows
-
         """
 
         if procset is None:
             procset = self._procset
 
-        if self.CC is None:
-            self.prepare_CC(procset, method = method, dc_mode = dc_mode, use_windows=use_windows, **kwargs)
+        params = {'procset': "'%s'" % procset, 'dc_mode': dc_mode}
+        if method:
+            params['method'] = "'%s'" % method
+        if not use_windows:
+            params['wid'] = -1
+
+        # distinct dispersion curve locations
+        dcs = self._sql.read_curve_cc(params)
+        self.dcs_per_location = {k: v for k, v in dcs.groupby('xmid')}
+
+        if filter:
+            self.filter_CC()
 
         starttime = time.time()
         print(f'Combining dispersion curves ..... ', end='')
 
-        self.CC.combine_all(**kwargs)
+        for key in self.dcs_per_location.keys():
 
-        endtime = time.time()
-        print(f'{np.round(endtime - starttime, 2)} s')
+            data = self.dcs_per_location[key]
 
-        # write data to database
-        for key in self.CC.data.keys():
-            # mean dispersion curve after combination
-            dc = self.CC.data[key]['cmb']
+            CC = CombineCurves(data)
+            combined_curve = CC.combination(**kwargs)
+
             data = {
                 'xmid': key,
                 'method': method,
                 'dc_mode': dc_mode,
-                 'f': dc.frequency,
-                 'v': dc.velocity,
-                 'err': dc.error}
+                 'frequency': combined_curve.frequency,
+                 'velocity': combined_curve.velocity,
+                 'error': combined_curve.error}
 
             self._sql.write_curve(data, -1, -1, procset=procset, wid=-1, xmid=key)
+
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
+
+    def filter_CC(self):
+        """Manually filter multiple dispersion curves"""
+
+        data = self.dcs_per_location
+
+        window = CurveFilter(data)
+        window.setWindowTitle("SWA - Dispersion Curve Filtering")
+        window.resize(800, 600)
+        window.show()
+
+        self.app.exec()
+        self.dcs_per_location = window.data_filtered
+
+        plt.close('all')
 
     def process_CC(self, type='smooth', procset=None, method = None, dc_mode=0, **kwargs):
         """
@@ -1750,7 +1722,7 @@ class MASW2DManager(BaseManager):
                     dc.plotColumn(axes=ax,
                                   xmid=xmid,
                                   vmin=vmin, vmax=vmax,
-                                  cmap=cmap, y_value='f', **kwargs)
+                                  cmap=cmap, y_value='frequency', **kwargs)
 
                 plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
                 ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
@@ -2082,7 +2054,7 @@ class Tomo2DManager(BaseManager):
         print(f'Running tomographic-like approach')
 
         # ensure phasediff table exists
-        if 'pd' not in self._sql.get_tables():
+        if 'phase_differences' not in self._sql.get_tables():
             self.compute_phasediff(procset)
 
         # frequencies
@@ -2223,9 +2195,9 @@ class Tomo2DManager(BaseManager):
                 'xmid': xmids[i],
                 'method': 'tomo2D',
                 'dc_mode': 0,
-                'f': freq,
-                'v': phi_vel_all[i, :],
-                'err': np.zeros_like(phi_vel_all[i, :])
+                'frequency': freq,
+                'velocity': phi_vel_all[i, :],
+                'error': np.zeros_like(phi_vel_all[i, :])
             }
 
             self._sql.write_curve(data, -1, -1, wid=-1,

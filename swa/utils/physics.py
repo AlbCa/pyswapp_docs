@@ -2,9 +2,9 @@ from collections.abc import Iterable
 import numpy as np
 
 # %% physics
-def wavenumber(f,vph):
+def wavenumber(f,vel):
     """compute wavenumber"""
-    return 2*np.pi*f/vph
+    return 2*np.pi*f/vel
 
 
 def phase_velocity(f,k):
@@ -25,36 +25,6 @@ def wavelength(f,vel):
 def frequency(lam,vel):
     """compute frequency"""
     return vel/lam
-
-
-def recordParam2freq(dt,npts):
-    """compute frequency from recording parameters"""
-    omega_fs = 2 * np.pi * 1 / dt
-    omega = np.arange(npts) * (omega_fs / npts)
-    return omega / (2 * np.pi)
-
-
-def poisson(vp,vs):
-    """compute poisson's ratio"""
-    vp = np.asarray(vp)
-    vs = np.asarray(vs)
-
-    return (vp ** 2 - 2 * vs ** 2) / (2 * (vp ** 2 - vs ** 2))
-
-
-def vpvs_ratio(vp, vs):
-    """compute vp/vs ratio"""
-    return vp / vs
-
-
-def vs2vp(vs, nu):
-    """compute vp from vs and nu"""
-    return vs*np.sqrt(2 * (1 - nu) / (1 - 2 * nu))
-
-
-def vp2vs(vp, nu):
-    """compute vs from vp and nu"""
-    return vp / ( np.sqrt(2 * (1 - nu) / (1 - 2 * nu)))
 
 
 def lorentzian_err(offsets, vel, f, nchannels = 24, dx = 1, **kwargs):

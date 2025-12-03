@@ -758,7 +758,7 @@ class SeismicStream:
         self._pst = st_proc
 
     def trim(self, by, **kwargs):
-        """non interactive time or receiver based trimming of the trace data"""
+        """non interactive time or offset based trimming of the trace data"""
 
         if by == 'time':
             min = kwargs.setdefault('min', 0)
@@ -781,17 +781,17 @@ class SeismicStream:
             nwin = kwargs.setdefault('wlen', len(self.receiver))
             self._trim_by_trace_window(nwin, xmid)
         elif by == 'select':
-            trace_indices = kwargs.setdefault('ids', np.arange(len(self.receiver)))
+            trace_indices = kwargs.setdefault('trace_ids', np.arange(len(self.receiver)))
             self._select_traces(trace_indices)
         elif by == 'remove':
-            trace_indices = kwargs.setdefault('ids', [])
+            trace_indices = kwargs.setdefault('trace_ids', [])
             self._remove_trace(trace_indices)
         else:
             print(f'Preprocessing function "{by}" not implemented.')
 
     def _trim_times_obspy(self, start_cut_off, end_cut_off):
         """cut times of stream by providing the amount of time that should be cut-off
-           at the beginning and end off the stream"""
+           at the beginning and end of the stream"""
 
         if self._pst is None:
             st_proc = self._st.copy()
@@ -1018,25 +1018,23 @@ class SeismicStream:
         """non-interactive FD based filtering of the trace data"""
 
         if by == 'frequency':
-            type = kwargs.setdefault('type', 'bandpass')
+            type = kwargs.setdefault('filter_type', 'bandpass')
             min = kwargs.setdefault('min', -np.inf)
             max = kwargs.setdefault('max', np.inf)
             self._filter_freq(type,min,max)
         elif by == 'FK':
             self._fk_filter_from_file(**kwargs)
-        elif by == 'LMO':
-            vel = kwargs.setdefault('vel', None)
+        elif by == 'lmo':
+            vel = kwargs.setdefault('velocity', None)
             bulk_shift = kwargs.setdefault('bulk_shift', 0)
             self._lmo(vel, bulk_shift)
-        # elif by == 'mute':
-        #     self._mute(**kwargs)
-        elif by == 'mute_trace':
-            trace_indices = kwargs.setdefault('ids', [])
+        elif by == 'mute':
+            trace_indices = kwargs.setdefault('trace_ids', [])
             self._mute_traces(trace_indices)
         elif by == 'resample':
             self.resample(**kwargs)
         elif by == 'reverse_polarity':
-            trace_indices = kwargs.setdefault('ids', [])
+            trace_indices = kwargs.setdefault('trace_ids', [])
             self._reverse_polarity(trace_indices)
         elif by == 'taper':
             self._apply_taper()
@@ -1256,7 +1254,7 @@ class SeismicStream:
 
     def _lmo(self, vel = None, bulk_shift=0):
         """
-        Liner move-out
+        Linear move-out
 
         Parameters
         ----------
@@ -1432,7 +1430,6 @@ class SeismicStream:
             elif key == 't':
                 mask[np.abs(k_grid) <= k_limit] = 0
 
-            # Optional: Apply taper (Hann window)
             taper_len = int(kwargs.pop('taper_length', 5) / (df))
             taper = signal.windows.hann(2 * taper_len)
             for j in range(mask.shape[0]):
@@ -1443,7 +1440,6 @@ class SeismicStream:
                     end = min(idx[0] + taper_len, len(kw))
                     mask[j, start:end] *= taper[:end - start]
 
-        # Apply mask to complex FK spectrum
         FK_abs_filt = FK_abs * mask
 
         # back transformation
@@ -1452,6 +1448,8 @@ class SeismicStream:
 
         amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
+
+        self.plot('FK', show = False)
 
     def reset_FK(self):
         """Reset FK filter"""
@@ -1558,7 +1556,7 @@ class SeismicStream:
             for i, vel in enumerate(vels):
                 ktrial = wavenumber(f, vel)
                 kx = ktrial*offsets
-                steer = self._steering_vector(kx,steering = 'none', sign=1)
+                steer = self._steering_vector(kx,steering = 'plane', sign=1)
                 V[i, j] = np.abs(np.sum(steer * u[:, f_index]/np.abs(u[:, f_index])))
                 ks[j] = ktrial
 
@@ -1581,8 +1579,7 @@ class SeismicStream:
         # broadcast weights across blocks
         u_weighted = u * weights[..., None]
 
-        R = np.einsum("ifk,jfk->ijf", u_weighted, u_weighted.conj()) / nblocks
-        return R
+        return np.einsum("ifk,jfk->ijf", u_weighted, u_weighted.conj()) / nblocks
 
     def _fdbf(self, steering = 'cylindrical'):
         """frequency-domain beamforming (Zywicki, 1999)"""
@@ -1787,8 +1784,8 @@ class SeismicStream:
             self._pick = True
             self.picks[self._pck_mode] = {
                 0: {
-                    "f": np.array(picked_freqs),
-                    "v": np.array(picked_vels),
+                    "frequency": np.array(picked_freqs),
+                    "velocity": np.array(picked_vels),
                     "chi2": np.array(picked_chi2),
                 }
             }
@@ -1850,7 +1847,7 @@ class SeismicStream:
                 freq_pick = self.frequency
                 vel_pick = self.velocity[peaks_idx]
 
-                self.picks[pck_mode] = {0:{'f': freq_pick, 'v': vel_pick}}
+                self.picks[pck_mode] = {0:{'frequency': freq_pick, 'velocity': vel_pick}}
 
             elif auto_method == 'MOPA':
                 # Apply MOPA to extract the dispersion curves
@@ -1859,7 +1856,7 @@ class SeismicStream:
             else:
                 raise NotImplementedError
         else:
-            raise ValueError(f'Picking mode not recognized. Use one of the key: "auto" \n '
+            raise ValueError(f'Picking mode not recognized. Use key: "auto" \n '
                              f'for automatic dispersion curve extraction. \n'
                              f'Use the gui for manual dispersion curve picking.')
 
@@ -1963,8 +1960,8 @@ class SeismicStream:
         if len(self.picks) > 0:
             if id in self.picks[self._pck_mode]:
                 self.curve = DispersionCurve()
-                self.curve.init_data(freq=self.picks[self._pck_mode][id]['f'],
-                                      vel=self.picks[self._pck_mode][id]['v'])
+                self.curve.init_data(freq=self.picks[self._pck_mode][id]['frequency'],
+                                      vel=self.picks[self._pck_mode][id]['velocity'])
             else:
                 raise ValueError(f'Mode id {id} does not exist yet.')
         else:
@@ -2000,8 +1997,8 @@ class SeismicStream:
             if len(self.picks) > 0:
                 if id in self.picks[self._pck_mode]:
                     curve = DispersionCurve()
-                    curve.init_data(freq=self.picks[self._pck_mode][0]['f'],
-                                    vel=self.picks[self._pck_mode][0]['v'])
+                    curve.init_data(freq=self.picks[self._pck_mode][0]['frequency'],
+                                    vel=self.picks[self._pck_mode][0]['velocity'])
                     curve.save(prjdir, fname, ext)
                 else:
                     warn_msg = f'Mode id {id} does not exist yet. No data has been saved.'
@@ -2751,9 +2748,9 @@ class SeismicStream:
             label = "amplitudes"
             limits = (np.min(dispersive_energy), np.max(dispersive_energy))
 
-        keyy = kwargs.pop("key","vel")
+        keyy = kwargs.pop("key","velocity")
 
-        if keyy == "k":
+        if keyy == "wavenumber":
             daty = self.wavenumber
             labely = "wavenumber (rad/m)"
         else:
@@ -2827,12 +2824,12 @@ class SeismicStream:
 
         # plot dispersion image and dispersion curves
         ax2.set_title(title)
-        self._plotDispersionImage(axes=ax2,keyy='vel',**kwargs)
+        self._plotDispersionImage(axes=ax2,keyy='velocity',**kwargs)
         if self._pick:
             for key1 in self.picks.keys():
                 for key2 in self.picks[key1].keys():
 
-                    ax2.plot(self.picks[key1][key2]['f'], self.picks[key1][key2]['v'],
+                    ax2.plot(self.picks[key1][key2]['frequency'], self.picks[key1][key2]['velocity'],
                             markeredgecolor='k',
                             marker="s",
                             markersize=5, color='white',
@@ -2903,12 +2900,12 @@ class SeismicStream:
                           edgecolor=ec, linewidth=0.8, zorder=2,
                           label=label, alpha=0.7)
 
-        if kwargs.setdefault('showFDBFResults', True):
+        if kwargs.setdefault('showResults', True):
             # %% dispersion curve obtained in classical sense as comparison
             self._fdbf()
             self.dcpicking(pck_mode='auto')
-            f_fdbf = self.picks['auto'][0]['f']
-            v_fdbf = self.picks['auto'][0]['v']
+            f_fdbf = self.picks['auto'][0]['frequency']
+            v_fdbf = self.picks['auto'][0]['velocity']
             ax[2].scatter(f_fdbf, v_fdbf, marker="s", s=25, c='k',
                           edgecolor='k', linewidth=0.8, zorder=-2, label='FDBF')
 

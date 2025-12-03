@@ -90,14 +90,14 @@ def plot_vphase(ax, val, f, lam=None, xmid=0, vmin=100, vmax=1000, y_value = 'la
         values = np.array(val)[sort_idx]
         draw1DColumn(ax, xmid, values, depth=np.hstack((wavelength, wavelength[-1])),
                          cmap=cmap, vmin=vmin, vmax=vmax,width = width)
-        ax.set_ylabel(r'$\lambda$ (m)')
+        ax.set_ylabel(r'wavelength (m)')
     else:
         sort_idx = np.argsort(f)
         f = f[sort_idx]
         values = np.array(val)[sort_idx]
         draw1DColumn(ax, xmid, values, depth=np.hstack((f, f[-1])),
                          cmap=cmap, vmin=vmin, vmax=vmax, width=width)
-        ax.set_ylabel(r'$f$ (Hz)')
+        ax.set_ylabel(r'frequency (Hz)')
 
     ax.set_xlabel('x (m)')
 
@@ -122,7 +122,7 @@ def plot_colorBar(ax,vmin,vmax, orientation='vertical', size=0.2, pad=None,**kwa
         cax = divider.append_axes("right", size=size, pad=pad)
 
     cmap = kwargs.setdefault('cmap', 'viridis')
-    label = kwargs.setdefault('label','vr (m/s)')
+    label = kwargs.setdefault('label','phase velocity (m/s)')
 
     norm = plt.Normalize(vmin, vmax)
     sm = ScalarMappable(norm=norm, cmap=mpl.colormaps[cmap])

@@ -1,5 +1,4 @@
 import matplotlib.path as mpltPath
-from scipy import interpolate
 
 from .utils import *
 
@@ -22,7 +21,7 @@ class DispersionCurve:
         self._mode = mode
         self._wave = wave
 
-    def init_data(self,freq, vel, err = None):
+    def init_data(self, freq, vel, err = None):
         """initialize data"""
 
         self.frequency = freq
@@ -69,10 +68,10 @@ class DispersionCurve:
 
         err = self._estimate_error(**kwargs)
         data = self.data.copy()
-        data['err'] = err
+        data['error'] = err
 
         curve_new = DispersionCurve(self._mode, self._wave)
-        curve_new.init_data(freq=data['f'], vel=data['vr'], err=data['err'])
+        curve_new.init_data(freq=data['frequency'], vel=data['velocity'], err=data['error'])
         return curve_new
 
     def set(self,param, value, orig = True):
@@ -102,41 +101,27 @@ class DispersionCurve:
         """store data in a data frame"""
 
         data = np.array([self.frequency, self.velocity, self.wavelength, self.wavenumber, self.error]).T
-        data = pd.DataFrame(data, columns=['f', 'vr', 'lam', 'k', 'err'])
+        data = pd.DataFrame(data, columns=['frequency', 'velocity', 'wavelength', 'wavenumber', 'error'])
 
         return data
 
-    @staticmethod
-    def _interp(x,y,xx,yerr = None, kind='cubic',**kwargs):
-        """interpolate data"""
-
-        f = interpolate.interp1d(x, y, kind=kind, **kwargs)
-        yy = f(xx)
-
-        if yerr is not None:
-            ferr = interpolate.interp1d(x, yerr, kind=kind, **kwargs)
-            yyerr = ferr(xx)
-            return xx,yy,yyerr
-        else:
-            return xx, yy, None
-
-    def resample(self, pmin, pmax, pn, pspace = 'log', param = 'f', kind = 'cubic', inplace = False,**kwargs):
+    def resample(self, pmin, pmax, pn, pspace = 'log', param = 'frequency', kind = 'cubic', inplace = False,**kwargs):
         """resample data"""
 
         data = self.data.copy()
 
-        if param in ['f','lam']:
+        if param in ['frequency','wavelength']:
             if pspace == 'log':
                 parx_new = np.geomspace(pmin,pmax,pn)
             else:
                 parx_new = np.linspace(pmin,pmax,pn)
 
             parx = data[param].values
-            pary = data['vr'].values
-            err = data['err'].values
-            parx_new, pary_new, err_new = self._interp(parx,pary,parx_new,yerr=err,kind = kind,**kwargs)
+            pary = data['velocity'].values
+            err = data['error'].values
+            parx_new, pary_new, err_new = interp(parx,pary,parx_new,yerr=err,kind = kind,**kwargs)
 
-            if param == 'lam':
+            if param == 'wavelength':
                 parx_new = self._compute_frequency(parx_new, pary_new)
 
             if inplace:
@@ -177,9 +162,9 @@ class DispersionCurve:
 
         data = self.data.copy()
 
-        vel = data['vr'].values
-        freq = data['f'].values
-        err = data['err'].values
+        vel = data['velocity'].values
+        freq = data['frequency'].values
+        err = data['error'].values
 
         vel_filt = self._median_filter(vel, kernel_size)
         vel_filt = self._moving_average_filter(vel_filt, kernel_size)
@@ -213,14 +198,14 @@ class DispersionCurve:
         data = self.data.copy()
         data = data.reset_index(drop=True)
 
-        f = data.f
-        vel = data.vr
+        f = data.frequency
+        vel = data.velocity
 
         flags = self._points_within_poly(vertices, f, vel)
         data['invalid'] = flags
         self.data = data
 
-    def markInvalid(self, pmin=None, pmax=None, param = 'f', mask = None):
+    def markInvalid(self, pmin=None, pmax=None, param = 'frequency', mask = None):
         """mark invalid data points"""
 
         data = self.data.copy()
@@ -256,14 +241,14 @@ class DispersionCurve:
         data = data.drop(columns = ['invalid'])
 
         if inplace:
-            self.init_data(freq=data['f'], vel=data['vr'], err=data['err'])
+            self.init_data(freq=data['frequency'], vel=data['velocity'], err=data['error'])
             self.npts = len(self.data)
         else:
             curve_new = DispersionCurve(self._mode, self._wave)
-            curve_new.init_data(freq=data['f'], vel=data['vr'], err=data['err'])
+            curve_new.init_data(freq=data['frequency'], vel=data['velocity'], err=data['error'])
             return curve_new
 
-    def filter(self, pmin=None, pmax=None, param = 'f', inplace = False):
+    def filter(self, pmin=None, pmax=None, param = 'frequency', inplace = False):
         """remove points outside of [pmin,pmax]"""
         self.markInvalid(pmin,pmax,param)
         return self.dropInvalid(inplace)
@@ -278,7 +263,7 @@ class DispersionCurve:
 
             outfile = os.path.join(prjdir, f"0_csv/{pre}.csv")
 
-            save2csv(outfile, np.asarray(data.f), np.asarray(data.vr), np.asarray(data.err))
+            save2csv(outfile, np.asarray(data.frequency), np.asarray(data.velocity), np.asarray(data.error))
 
         elif format in ['ParkSeis','PS','dat','DAT']:
 
@@ -287,8 +272,8 @@ class DispersionCurve:
 
                 outfile = prjdir + f"/01_DC/{pre}.DC"
 
-                f = data.f.values
-                vel = data.vel.values
+                f = data.frequency.values
+                vel = data.velocity.values
                 snr = np.ones_like(f)
 
                 save2DC(outfile, parkseis_params, f, vel, snr)
@@ -302,8 +287,8 @@ class DispersionCurve:
         if data is None:
             data = self.data.copy()
 
-        keyy = kwargs.pop('y_value', 'vr')
-        keyx = kwargs.pop('x_value', 'f')
+        keyy = kwargs.pop('y_value', 'velocity')
+        keyx = kwargs.pop('x_value', 'frequency')
         color = kwargs.pop('color', 'royalblue')
         label = kwargs.pop('label','data')
         alpha = kwargs.pop('alpha',0.7)
@@ -313,18 +298,18 @@ class DispersionCurve:
         figsize = kwargs.pop('figsize',(8,8))
         edgecolor = kwargs.pop('edgecolor',color)
 
-        if keyy == 'vr':
-            err = data.err.values
+        if keyy == 'velocity':
+            err = data.error.values
             labely = "phase velocity (m/s)"
-        elif keyy == 'k':
-            err_vr = data.err.values
-            err = wavenumber(data.f.values,err_vr)
+        elif keyy == 'wavenumber':
+            err_vr = data.error.values
+            err = wavenumber(data.frequency.values,err_vr)
             labely = 'wavenumber (rad/m)'
         else:
             raise KeyError
-        if keyx == 'f':
+        if keyx == 'frequency':
             labelx = "frequency (Hz)"
-        elif keyx == 'lam':
+        elif keyx == 'wavelength':
             labelx = 'wavelength (m)'
         else:
             raise KeyError
@@ -340,11 +325,11 @@ class DispersionCurve:
             ax.scatter(data_orig[keyx], data_orig[keyy], marker=marker, s=marker_size, c='k', edgecolor='k',
                        linewidth=0.8, zorder=2, label='orig. data',alpha = alpha, **kwargs)
 
-            if keyy == 'vr':
-                err_orig = data_orig.err.values
-            elif keyy == 'k':
-                err_vr = data_orig.err.values
-                err_orig = wavenumber(data.f.values, err_vr)
+            if keyy == 'velocity':
+                err_orig = data_orig.error.values
+            elif keyy == 'wavenumber':
+                err_vr = data_orig.error.values
+                err_orig = wavenumber(data.frequency.values, err_vr)
             else:
                 raise KeyError
 
@@ -356,7 +341,7 @@ class DispersionCurve:
 
         if (np.sum(err) != 0) & kwargs.setdefault('showErr', False):
 
-            ax.fill_between(x = data[keyx], y1 = data.vr - err, y2 =  data.vr + err, alpha = 0.2,
+            ax.fill_between(x = data[keyx], y1 = data.velocity - err, y2 =  data.velocity + err, alpha = 0.2,
                             color = color, linewidth = 2, edgecolor = None, label = 'data error')
 
         ax.grid(True, linestyle=':')
@@ -409,7 +394,7 @@ class DispersionCurve:
         if data is None:
             data = self.data.copy()
 
-        plot_vphase(ax, data.vr.values, f=data.f.values, lam=None, **kwargs)
+        plot_vphase(ax, data.velocity.to_numpy(), f=data.frequency.to_numpy(), lam=None, **kwargs)
 
         if axes is not None:
             return ax

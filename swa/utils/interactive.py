@@ -2,42 +2,62 @@ from contextlib import suppress
 
 import warnings
 import numbers
-from collections.abc import Iterable
 
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.path as mpltPath
 from matplotlib.backend_bases import MouseEvent
-from scipy.stats import alpha
+
+from .utils import *
 
 from .physics import lorentzian_err
 
+import numpy as np
+from collections.abc import Iterable
+
 class DraggablePoints:
     def __init__(self, ax, points=None, **kwargs):
+        if ax is None:
+            raise ValueError("Argument 'ax' must be a valid Matplotlib Axes instance.")
+
         self.ax = ax
         self.canvas = self.ax.figure.canvas
 
-        self.distance_threshold = 0.1  # Threshold in data coords (adjust if needed)
+        self.distance_threshold = 0.1
         self._dragging_point = None
-        self._points = {}  # Dict: x -> y
+        self._points = {}   # Dict: x -> y
         self._line = None
 
+        self.logger = create_logging(name='Interactive')
+
+        # Extract plotting kwargs
         color = kwargs.pop('color', 'r')
         ls = kwargs.pop('linestyle', '--')
         lw = kwargs.pop('linewidth', 1)
         ms = kwargs.pop('markersize', 7)
         marker = kwargs.pop('marker', 'x')
-        self._plot_kwargs = {'color':color,'linestyle':ls,'linewidth':lw, 'markersize':ms,'marker':marker}
+        self._plot_kwargs = {
+            'color': color,
+            'linestyle': ls,
+            'linewidth': lw,
+            'markersize': ms,
+            'marker': marker
+        }
 
         self._kwargs = kwargs
 
+        # Initialize points if provided
         if points:
-            for x, y in points.items():
-                self._points[x] = y
-
             try:
-                self.ax.lines[-1].remove()
-            except IndexError:
+                for x, y in points.items():
+                    self._points[x] = y
+            except Exception as e:
+                self.logger.warning(f"Failed to load initial points: {e}")
+
+            # remove last line
+            try:
+                if self.ax.lines:
+                    self.ax.lines[-1].remove()
+            except Exception:
                 pass
 
             self._update_plot()
@@ -50,25 +70,23 @@ class DraggablePoints:
         self.canvas.mpl_connect('button_release_event', self._on_release)
         self.canvas.mpl_connect('motion_notify_event', self._on_motion)
 
-    def _update_plot(self,kwargs=None):
+    def _update_plot(self, kwargs=None):
         """Update line data and redraw."""
-
         if self._line and (self._line in self.ax.lines):
-            self._line.remove()  # Remove the old line artist
+            self._line.remove()
             self._line = None
 
-        if self._points:
-
-            x, y = zip(*sorted(self._points.items()))
-            self._line, = self.ax.plot(x, y, **self._plot_kwargs)
+        try:
+            if self._points:
+                x, y = zip(*sorted(self._points.items()))
+                self._line, = self.ax.plot(x, y, **self._plot_kwargs)
+        except Exception as e:
+            self.logger.warning(f"Failed to update plot: {e}")
 
         self.canvas.draw_idle()
 
     def _add_point(self, x, y=None):
         """add a new point"""
-        # if isinstance(x, MouseEvent):
-        #     x, y = float(x.xdata), float(x.ydata)
-
         self._points[x] = y
         return x, y
 
@@ -78,46 +96,47 @@ class DraggablePoints:
             self._points.pop(x)
 
     def _find_neighbor_point(self, event):
-        """ Find point around mouse position"""
+        """Find point around mouse position."""
+        try:
+            if not self._points or event.xdata is None or event.ydata is None:
+                return None
 
-        if not self._points or event.xdata is None or event.ydata is None:
-            return None
-
-        if self._points:
-            # poinst list
             points = []
             for x, y in self._points.items():
-                if isinstance(y, Iterable):
-                    y = y[0]
-                points.append((x, y))
+                try:
+                    if isinstance(y, Iterable):
+                        y = y[0]
+                    points.append((x, y))
+                except Exception:
+                    continue
 
-            mouse_pos = np.array([event.xdata,event.ydata])
+            mouse_pos = np.array([event.xdata, event.ydata])
 
-            # get nearest point
             distances = np.sum((np.asarray(points) - mouse_pos) ** 2, axis=1)
             nearest_idx = np.argmin(distances)
 
             if distances[nearest_idx] < self.distance_threshold:
-                nearest_point = (points[nearest_idx][0], points[nearest_idx][1])
-                return nearest_point
-            else:
-                return None
+                return points[nearest_idx]
+        except Exception:
+            pass
 
+        return None
 
     def _on_click(self, event):
         if event.inaxes != self.ax:
             return
 
-        # Left click: start drag or add point
+        # Left click
         if event.button == 1:
             point = self._find_neighbor_point(event)
             if point:
                 self._dragging_point = point
             else:
-                self._add_point(event.xdata, event.ydata)
-                self._update_plot()
+                if event.xdata is not None and event.ydata is not None:
+                    self._add_point(event.xdata, event.ydata)
+                    self._update_plot()
 
-        # Right click: remove point
+        # Right click
         elif event.button == 3:
             point = self._find_neighbor_point(event)
             if point:
@@ -171,9 +190,6 @@ class SeismoInteractive(DraggablePoints):
         self.plot_slope = None
 
     def _add_point(self, x, y=None):
-
-        # if isinstance(x, MouseEvent):
-        #     x, y = float(x.xdata), float(x.ydata)
 
         # snap to data
         indx = np.searchsorted(self.x, [x])[0]
@@ -322,8 +338,14 @@ class FKFilterInteractive(DraggablePoints):
 
         self._key = 't'
         self._terminate = False
-        # self._reset = False
-        # self._reset_last = False
+
+    def update_plot(self):
+
+        if self._points:
+
+            # reset plot
+            self._points = {}
+            self._update_plot()
 
     def filter(self):
 
@@ -342,18 +364,15 @@ class FKFilterInteractive(DraggablePoints):
     def _on_key(self, event):
         """keyboard events"""
         if event.key == 'e':
-            #print(f'You pressed {event.key}. Process stopped.')
             self._terminate = True
             plt.close()
 
         if event.key == 't':
-            #print(f'You pressed {event.key}.')
             self._key = 't'
             self.ax.set_title('Top filter active', fontweight='bold') # change to textbox
             self.canvas.draw_idle()
 
         if event.key == 'b':
-            #print(f'You pressed {event.key}.')
             self._key = 'b'
             self.ax.set_title('Bottom filter active', fontweight='bold') # change to textbox
             self.canvas.draw_idle()
@@ -375,28 +394,34 @@ class FKFilterInteractive(DraggablePoints):
 class DCPickingInteractive(DraggablePoints):
     """class for drawing boundaries for dispersion curve extraction"""
 
-    def __init__(self, ax, points = None,
-                 data = None, freq=None, vel=None, power=None, offsets=None, err = 'lor', picks = None, **kwargs):
+    def __init__(self, ax, points=None,
+                 data=None, freq=None, vel=None, power=None, offsets=None,
+                 err='lor', picks=None, **kwargs):
 
         super().__init__(ax)
 
-        # data
-        if data:
-            self._freq = data.frequency
-            self._vel = data.velocity
-            self._power = data.dispersive_energy
-            self._offsets = data.offset
-        else:
-            self._freq = freq
-            self._vel = vel
-            self._power = power
-            self._offsets = offsets
+        # load data
+        try:
+            if data:
+                self._freq = getattr(data, 'frequency', None)
+                self._vel = getattr(data, 'velocity', None)
+                self._power = getattr(data, 'dispersive_energy', None)
+                self._offsets = getattr(data, 'offset', None)
+            else:
+                self._freq = freq
+                self._vel = vel
+                self._power = power
+                self._offsets = offsets
+        except Exception as e:
+            self.logger.warning(f"Failed to extract data attributes: {e}")
+            self._freq = self._vel = self._power = self._offsets = None
 
         self._err = err
 
         self._init_param()
         self._init_plot()
 
+        # Load picks if provided
         if picks is not None:
             self._picks = picks
             self._update_plot(**kwargs)
@@ -405,15 +430,18 @@ class DCPickingInteractive(DraggablePoints):
             for x, y in points.items():
                 self._points[x] = y
 
-            for line in ax.lines:
-                line.remove()
+            # Line removal
+            try:
+                for line in list(ax.lines):
+                    line.remove()
+            except Exception:
+                pass
 
             self._update_polygons()
             self._update_plot()
 
     def _init_plot(self):
         """event connections"""
-
         self.canvas.mpl_connect('button_release_event', self._on_release)
         self.canvas.mpl_connect('button_press_event', self._on_click)
         self.canvas.mpl_connect('motion_notify_event', self._on_motion)
@@ -421,9 +449,7 @@ class DCPickingInteractive(DraggablePoints):
         self.canvas.mpl_connect('scroll_event', self._on_scroll)
 
     def _init_param(self):
-        """initialize some parameters"""
-
-        # picks
+        """initialize parameters"""
         self._reset = False
         self._mode = 0
         self._polygons = {}
@@ -431,13 +457,11 @@ class DCPickingInteractive(DraggablePoints):
         self._ppid = 0
         self._picks_prior = {}
 
-        # boundary
         self._boundary_strength = 0.3
         self._minVelErr = 20
         self._boundary_min = self._minVelErr
         self._points_prior = {}
 
-        # lines
         self._pick_lines = {}
         self._line = None
         self._upper_bound_line = None
@@ -446,88 +470,125 @@ class DCPickingInteractive(DraggablePoints):
     def _update_plot(self, **kwargs):
         """update plot after event"""
 
-        show_legend = kwargs.pop('show_legend',True)
-        marker_size = kwargs.pop('markersize',3)
-        alpha = kwargs.pop('alpha',1)
+        try:
+            show_legend = kwargs.pop('show_legend', True)
+            marker_size = kwargs.pop('markersize', 3)
+            alpha = kwargs.pop('alpha', 1)
+        except Exception:
+            show_legend = True
+            marker_size = 3
+            alpha = 1
 
-        # plot picked dispersion curve
-        if not self._points:
+        try:
+            # case 1: no boundary drawn → show picks
+            if not self._points:
+                cmap = getattr(plt.cm, 'Greys', plt.cm.viridis)
+                color = cmap(np.linspace(0, 1, 10))
 
-            cmap = getattr(plt.cm, 'Greys')
-            color = cmap(np.linspace(0, 1, 10))
-
-            # Remove existing pick line if present
-            if self._mode in self._pick_lines:
-                self._pick_lines[self._mode].remove()
-                self._pick_lines.pop(self._mode)
-
-                if self._pick_lines:
-                    self.ax.legend(loc='upper right')
-                else:
+                if self._mode in self._pick_lines:
                     try:
-                        self.ax.get_legend().remove()
-                    except AttributeError:
+                        self._pick_lines[self._mode].remove()
+                    except Exception:
+                        pass
+                    self._pick_lines.pop(self._mode, None)
+
+                    try:
+                        if self._pick_lines:
+                            self.ax.legend(loc='upper right')
+                        else:
+                            lg = self.ax.get_legend()
+                            if lg:
+                                lg.remove()
+                    except Exception:
                         pass
 
-            # Clear existing lines
-            if self._line:
-                self._line.set_data([], [])
-            if self._upper_bound_line:
-                self._upper_bound_line.set_data([], [])
-            if self._lower_bound_line:
-                self._lower_bound_line.set_data([], [])
+                if self._line:
+                    try:
+                        self._line.set_data([], [])
+                    except Exception:
+                        pass
+                if self._upper_bound_line:
+                    try:
+                        self._upper_bound_line.set_data([], [])
+                    except Exception:
+                        pass
+                if self._lower_bound_line:
+                    try:
+                        self._lower_bound_line.set_data([], [])
+                    except Exception:
+                        pass
 
-            # Plot picks if available
-            for self._mode in self._picks:
-                if self._mode not in self._pick_lines and not self._reset:
-                    picks = self._picks[self._mode]
-                    pick_line, = self.ax.plot(
-                        picks['f'],
-                        picks['v'],
-                        marker="s",
-                        markersize=marker_size,
-                        markeredgecolor='k',
-                        color=color[self._mode],
-                        linewidth=0,
-                        alpha = alpha,
-                        label=f'Mode {self._mode}'
-                    )
-                    if show_legend:
-                        self.ax.legend(loc='upper right')
-                    self._pick_lines[self._mode] = pick_line
+                # draw picks
+                for self._mode in self._picks:
+                    if self._mode not in self._pick_lines and not self._reset:
+                        try:
+                            picks = self._picks[self._mode]
+                            pick_line, = self.ax.plot(
+                                picks['frequency'],
+                                picks['velocity'],
+                                marker="s",
+                                markersize=marker_size,
+                                markeredgecolor='k',
+                                color=color[self._mode],
+                                linewidth=0,
+                                alpha=alpha,
+                                label=f'Mode {self._mode}'
+                            )
+                            if show_legend:
+                                self.ax.legend(loc='upper right')
+                            self._pick_lines[self._mode] = pick_line
+                        except Exception as e:
+                            self.logger.warning(f"Failed plotting picks: {e}")
 
-        # draw boundary
-        else:
-            x, raw_y = zip(*sorted(self._points.items()))
-            y_data = [val[0] for val in raw_y]
-            y_lower = [val[2] for val in raw_y]
-            y_upper = [val[1] for val in raw_y]
-
-            if self._line is None:
-                # Initial plot
-                self._line, = self.ax.plot(
-                    x, y_data, marker="o", markersize=7,
-                    markeredgecolor='k', color='white', linewidth=0
-                )
-                marker_style = dict(color="r", marker="o", markersize=3, linestyle='--', linewidth=0.8)
-                self._upper_bound_line, = self.ax.plot(x, y_lower, **marker_style)
-                self._lower_bound_line, = self.ax.plot(x, y_upper, **marker_style)
+            # case 2: user is drawing boundaries
             else:
-                # Update plot data
-                self._line.set_data(x, y_data)
-                self._upper_bound_line.set_data(x, y_lower)
-                self._lower_bound_line.set_data(x, y_upper)
+                try:
+                    x, raw_y = zip(*sorted(self._points.items()))
+                except Exception:
+                    return
 
-        self.canvas.draw_idle()
+                try:
+                    y_data = [val[0] for val in raw_y]
+                    y_lower = [val[2] for val in raw_y]
+                    y_upper = [val[1] for val in raw_y]
+                except Exception:
+                    return
+
+                try:
+                    if self._line is None:
+                        self._line, = self.ax.plot(
+                            x, y_data,
+                            marker="o", markersize=7,
+                            markeredgecolor='k',
+                            color='white',
+                            linewidth=0
+                        )
+                        marker_style = dict(color="r", marker="o",
+                                            markersize=3, linestyle='--', linewidth=0.8)
+                        self._upper_bound_line, = self.ax.plot(x, y_lower, **marker_style)
+                        self._lower_bound_line, = self.ax.plot(x, y_upper, **marker_style)
+                    else:
+                        self._line.set_data(x, y_data)
+                        self._upper_bound_line.set_data(x, y_lower)
+                        self._lower_bound_line.set_data(x, y_upper)
+
+                except Exception as e:
+                    self.logger.warning(f"Failed updating boundary plot: {e}")
+
+            self.canvas.draw_idle()
+        except Exception as e:
+            self.logger.error(f"Error in _update_plot: {e}")
 
     def _add_point(self, x, y=None):
-        """add new point with upper and lower boundary"""
-
-        if isinstance(x, MouseEvent):
-            x, y = float(x.xdata), float(x.ydata)
+        """add new point with upper/lower boundaries"""
+        try:
+            if isinstance(x, MouseEvent):
+                x, y = float(x.xdata), float(x.ydata)
+        except Exception:
+            return None, None
 
         if (self._err == 'lor') and (self._offsets is not None):
-            err = lorentzian_err(self._offsets,y, x)
+            err = lorentzian_err(self._offsets, y, x)
         elif isinstance(self._err, numbers.Number):
             err = self._err
         else:
@@ -538,87 +599,75 @@ class DCPickingInteractive(DraggablePoints):
         return x, y
 
     def _update_bounds(self):
-        """update boundaries"""
-
-        xs, ys = zip(*sorted(self._points.items()))
+        try:
+            xs, ys = zip(*sorted(self._points.items()))
+        except Exception:
+            return
 
         for i in range(len(ys)):
             x = xs[i]
             y = ys[i][0]
+
             if (self._err == 'lor') and (self._offsets is not None):
-                err = lorentzian_err(self._offsets, y, x, a=self._boundary_strength,minvelerr= self._boundary_min)
+                err = lorentzian_err(
+                    self._offsets, y, x,
+                    a=self._boundary_strength,
+                    minvelerr=self._boundary_min
+                )
             elif isinstance(self._err, numbers.Number):
-                err = self._err*self._boundary_strength
+                err = self._err * self._boundary_strength
             else:
-                err = 10*self._boundary_strength
+                err = 10 * self._boundary_strength
 
             self._points[x] = [y, y + err, y - err]
 
     def _update_polygons(self):
         """update polygons after event"""
-
         x, ys = zip(*sorted(self._points.items()))
-        y = [];
-        y_lo = [];
-        y_up = []
-        for i in range(len(ys)):
-            y.append(ys[i][0])
-            y_lo.append(ys[i][2])
-            y_up.append(ys[i][1])
+        y_lo = [p[2] for p in ys]
+        y_up = [p[1] for p in ys]
 
         bound_lo = np.vstack((np.array(x), np.array(y_lo))).T
         bound_up = np.flipud(np.vstack((np.array(x), np.array(y_up))).T)
-        polygon = np.vstack((bound_up, bound_lo))
-        self._polygons = polygon
+
+        self._polygons = np.vstack((bound_up, bound_lo))
 
     def _extract_dccurve(self):
-        """extract the dispersion curve based on the maximum dispersive energy within the drawn boundaries"""
+        """extract dispersion curve within boundary"""
+        if self._freq is None or self._vel is None or self._power is None:
+            self.logger.warning("Frequency, velocity, and power must be defined.")
+            return
 
-        if (self._freq is not None) and (self._vel is not None) and (self._power is not None):
+        fgrid, vgrid = np.meshgrid(self._freq, self._vel, indexing='xy')
+        path = mpltPath.Path(self._polygons)
 
-            fgrid, vgrid = np.meshgrid(self._freq, self._vel)
-            polygon = self._polygons
+        # Test points inside polygon
+        points = np.column_stack((fgrid.ravel(), vgrid.ravel()))
+        flags = path.contains_points(points).reshape(self._power.shape)
 
-            path = mpltPath.Path(polygon)
-            flags = path.contains_points(np.hstack((fgrid.flatten()[:, np.newaxis],
-                                                    vgrid.flatten()[:, np.newaxis])))
-            flags = flags.reshape(self._power.shape)
+        if not flags.any():
+            return
 
-            row_cols = np.where(flags[:, ])
-            power_mask = np.ma.masked_array(self._power, mask=~flags, fill_value=0)
-            peaks_idx = np.argmax(power_mask, axis=0)
+        masked_power = np.where(flags, self._power, -np.inf)
+        peaks_idx = masked_power.argmax(axis=0)
+        cols = np.flatnonzero(flags.any(axis=0))
 
-            idx = np.unique(row_cols[1])
-            freq_pick = self._freq[idx]
-            vel_pick = self._vel[peaks_idx][idx]
+        freq_pick = self._freq[cols]
+        vel_pick = self._vel[peaks_idx[cols]]
 
-            self._picks[self._mode] = {'f':freq_pick,'v':vel_pick}
+        self._picks[self._mode] = {'frequency': freq_pick, 'velocity': vel_pick}
+        self._picks_prior[self._ppid] = {'frequency': freq_pick, 'velocity': vel_pick}
 
-            # visualize prior picks (needs to be stored somewhere)
-            self._picks_prior[self._ppid] = {'f':freq_pick,'v':vel_pick}
-            self._ppid += 1
-            if self._ppid < 5:
-                self._ppid += 1
-            else:
-                self._ppid = 0
-        else:
-            warnings.warn("Dispersive energy, frequency and velocity ranges"
-                          " must be provided for dispersion curve extraction.")
+        self._ppid = (self._ppid + 1) % 5
 
     def interact(self):
         """extract dispersion curve within boundary"""
-
         if self._points:
             self._extract_dccurve()
-
-            # reset plot
             self._points = {}
             self._update_plot()
 
     def _on_click(self, event):
-        """add/remove points on click"""
-
-        # left click
         if event.button == 1 and event.inaxes in [self.ax]:
             point = self._find_neighbor_point(event)
             if point:
@@ -630,22 +679,18 @@ class DCPickingInteractive(DraggablePoints):
             if len(self._points) > 1:
                 self._update_polygons()
 
-        # right click
         elif event.button == 3 and event.inaxes in [self.ax]:
             point = self._find_neighbor_point(event)
-            # clicking on point calls point deletion
             if point:
                 self._remove_point(*point)
                 self._update_plot()
 
-    def _on_scroll(self,event):
-        """tighten or loosen boundary on mouse scroll"""
-
+    def _on_scroll(self, event):
         if len(self._points) > 0:
             increment_strength = 0.05
             increment_min = 0.5
-            if event.button == 'up':
 
+            if event.button == 'up':
                 if self._boundary_strength <= 1:
                     self._boundary_strength += increment_strength
                 elif self._boundary_min > 1 + increment_min:
@@ -653,7 +698,6 @@ class DCPickingInteractive(DraggablePoints):
             else:
                 if self._boundary_strength > increment_strength:
                     self._boundary_strength -= increment_strength
-
                 if self._boundary_min < self._minVelErr:
                     self._boundary_min += increment_min
 
@@ -662,48 +706,32 @@ class DCPickingInteractive(DraggablePoints):
             self._update_plot()
 
     def _on_key(self, event):
-        """keyboard events"""
 
         if event.key.isnumeric():
-
             mode = int(event.key)
             if self._mode != mode:
                 self._mode = mode
 
         if event.key == 'p':
-            #print(f'Extracting F{self._mode} DC curve.')
-
             if self._points:
                 self._extract_dccurve()
-
-                # reset plot
                 self._points = {}
                 self._update_plot()
 
         if event.key == 'r':
-            #print(f'Reset.')
-
             self._reset = True
-
-            # reset plot
-            if self._mode in self._picks.keys():
+            if self._mode in self._picks:
                 self._picks.pop(self._mode)
-
             self._polygons = {}
             self._points = {}
             self._update_plot()
-
             self._reset = False
 
         if event.key == 'd':
-            #print(f'Delete boundary.')
-
-            # reset plot
             self._points = {}
             self._update_plot()
 
         if event.key == 'e':
-            #print(f'You pressed {event.key}. Process stopped.')
             self._terminate = True
             plt.close()
 
@@ -714,4 +742,5 @@ class DCPickingInteractive(DraggablePoints):
     @property
     def picks(self):
         return self._picks
+
 

@@ -3,7 +3,7 @@ from .stream import SeismicStream
 from .curve import DispersionCurve
 from .curves import CombineCurves
 from .qtapps import (QApplication, DataSwitcherBase,DataSwitcherPick,
-                     DataSwitcherFilterFK,DataSwitcherFilterSeis,DualDataSwitcher,FigureSwitcher)
+                     DataSwitcherFilterFK,DualDataSwitcher,FigureSwitcher)
 
 from .utils import *
 

@@ -319,8 +319,9 @@ class SQL:
     def duplicate_data(self,data, sin, rep, wid=-1):
 
         params = {'sin': sin, 'rep': rep, 'procset': "'%s'" % 'tmp', 'wid': wid}
-        if self.check_data('amplitudes', params):
-            self.write_data(data, sin, rep, 'tmp', wid=wid)
+        if not self.check_data('amplitudes', params):
+            self.delete_data('amplitudes', params)
+        self.write_data(data, sin, rep, 'tmp', wid=wid)
 
     def write_data(self, data, sin, rep, procset, wid=-1):
         """Write amplitude data in TX domain to SQL table 'amplitudes'."""
@@ -644,9 +645,9 @@ class SQL:
                             'xmid': data['xmid'],
                             'method': data['method'],
                             'dc_mode': data['dc_mode'],
-                            'frequency': data['f'],
-                            'velocity': data['v'],
-                            'error': data['err']})
+                            'frequency': data['frequency'],
+                            'velocity': data['velocity'],
+                            'error': data['error']})
 
         params = {
             "procset": f"'{procset}'",
@@ -662,15 +663,21 @@ class SQL:
             self.delete_data("curves", params)
         self.to_sql(df, name="curves", if_exists="append", index=False)
 
-    def read_curve(self, params):
+    def read_curve(self, params, cols = '*'):
         """Write dispersion curve data from SQL table 'curves'."""
 
-        sql = """SELECT *
-                  FROM curves
-                  WHERE """
-
-        sql = "SELECT * FROM curves WHERE "
+        sql = f"SELECT {cols} FROM curves WHERE "
         sql += " AND ".join(f"{k}=={v}" for k, v in params.items())
+
+        curve = self.read_sql(sql)
+        return curve
+
+    def read_curve_cc(self, params, cols = '*'):
+        """Write dispersion curve data from SQL table 'curves'."""
+
+        sql = f"SELECT {cols} FROM curves WHERE "
+        sql += " AND ".join(f"{k}=={v}" for k, v in params.items())
+        sql += " AND sin != -1 AND rep != -1"
 
         curve = self.read_sql(sql)
         return curve
@@ -694,22 +701,14 @@ class SQL:
     def read_filter(self, params):
         """Read filter from SQL table 'filter'."""
 
-        sql = """SELECT *
-                  FROM filter
-                  WHERE """
-
-        npar = len(params)
-        for i, key in enumerate(params.keys()):
-
-            if i < npar - 1:
-                sql += f"{key}=={params[key]} AND "
-            else:
-                sql += f"{key}=={params[key]}"
+        sql = "SELECT * FROM filter WHERE "
+        sql += " AND ".join(f"{k}=={v}" for k, v in params.items())
 
         filter = self.read_sql(sql)
 
-        filter.sort_values(['key', 'xp'], ascending=[True, True],inplace=True)
-        filter.reset_index(inplace = True, drop = True)
+        if not filter.empty:
+            filter.sort_values(['key', 'x_value'], ascending=[True, True],inplace=True)
+            filter.reset_index(inplace = True, drop = True)
 
         return filter
 

@@ -1,8 +1,22 @@
 import numpy as np
 
-# %% helper functions for inversion
+# %% helper functions for solving system of equations
 def linear_LSQR(x,y,w=None):
-    """estimate coefficients of a line y = k*x+phi0"""
+    """
+    Estimate coefficients of a line y = k*x+phi0
+
+    Parameters
+    ----------
+    x : np.ndarray, offsets
+    y : np.ndarray, phases
+    w : np.ndarray, weights
+
+    Returns
+    -------
+    k: float, wavenumber
+    phi0: float, shift
+    """
+
 
     if w is None:
         W = np.diag(np.ones(len(x)))
@@ -43,7 +57,7 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
     f : float, frequency value of the analysis
     A : np.ndarray, design matrix
     dphi : np.ndarray, phase differences
-    w : np.ndarray, weight matrix
+    w : np.ndarray, weights
 
     Returns
     -------
