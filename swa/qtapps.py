@@ -372,10 +372,10 @@ class DataSwitcherBase(QWidget):
         if amps is not None:
             amps_ari = amps.transpose()
             data.update_pst(amps_ari, sht, recs, par)
-            return True
+            return True, data
         else:
             #self.logger.warning('No data.')
-            return False
+            return False, None
 
     def _set_FV(self, data, sin, rep, procset, wid=-1, method='phaseshift'):
         """set FV data from database to current stream"""
@@ -410,7 +410,7 @@ class DataSwitcherBase(QWidget):
 
         try:
             self.stream = self.select_data(label[0], label[1])
-            self.data_exists = self._set_data(self.stream, label[0], label[1], procset, label[2])
+            self.data_exists,_ = self._set_data(self.stream, label[0], label[1], procset, label[2])
         except Exception as err:
             self.logger.error(f"Error setting data: {err}")
             return None
@@ -420,7 +420,7 @@ class DataSwitcherBase(QWidget):
             try:
                 FV_flag = self._set_FV(self.stream, label[0], label[1], procset,
                                        method=self.method, wid=label[2])
-                self.data_exists = self.data_exists and FV_flag
+                self.data_exists,_ = self.data_exists and FV_flag
             except Exception as err:
                 self.logger.error(f"Error in FV setup: {err}")
                 return None
@@ -674,9 +674,11 @@ class DataSwitcherBase(QWidget):
     def select_data(self, sin=1, rep=1):
         """Select one stream object based on source location and shot repetition indices"""
 
-        if sin in self.data.keys():
-            if rep in self.data[sin].keys():
-                return self.data[sin][rep]
+        data = copy.deepcopy(self.data)
+
+        if sin in data.keys():
+            if rep in data[sin].keys():
+                return data[sin][rep]
 
         return None
 
@@ -1026,22 +1028,30 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         try:
             self.layout = QVBoxLayout(self)
 
+            self.toolbar1 = NavigationToolbar(self.canvas, self)
+            self.toolbar2 = NavigationToolbar(self.canvas1, self)
+
+            self.toolbar_layout = QHBoxLayout()
+
             self.info_layout = QHBoxLayout()
+
             label = QLabel(self.window_label)
             label.setStyleSheet("font-size: 14px; color: gray;")
+            self.info_layout.addWidget(label)
+
+            # SIN/REP/WIN index
             self.label = QLabel()
             self.label.setStyleSheet("font-size: 14px; color: gray;")
-            self.info_layout.addWidget(label)
+
             self.info_layout.addStretch()
             self.info_layout.addWidget(self.label)
             self.layout.addLayout(self.info_layout)
 
-            # Navigation buttons
+            # Navigation bar
             self.nav_layout = QHBoxLayout()
             self.left_btn = QPushButton()
             self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
             self.left_btn.setFixedSize(40, 40)
-
             self.right_btn = QPushButton()
             self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
             self.right_btn.setFixedSize(40, 40)
@@ -1049,29 +1059,27 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.nav_layout.addWidget(self.left_btn)
             self.nav_layout.addWidget(self.right_btn)
 
-            # Procset combo
             if not self.is_grouped:
                 self.combo = self.add_combobox(self.procsets, self.procset)
                 self.combo.currentTextChanged.connect(self.set_procset)
                 self.nav_layout.addWidget(self.combo)
 
-            # SIN combo
             if not self.is_grouped:
                 _, indices = np.unique(np.asarray(self.labels)[:, 0], return_index=True)
                 indices = np.char.mod('%d', indices + 1)
+
                 self.combo_select_sin = self.add_combobox(indices,
                                                           str(self.current_index + 1),
-                                                          'SIN:', 50)
+                                                          'SIN:',
+                                                          50)
                 self.combo_select_sin.currentTextChanged.connect(self.set_index)
                 self.nav_layout.addWidget(self.combo_select_sin)
 
-            # Interaction button
             if self.interaction_class:
                 self.interact_btn = QPushButton(self.btn_label)
                 self.interact_btn.setFixedSize(100, 40)
                 self.nav_layout.addWidget(self.interact_btn)
 
-            # Popup button
             self.popup_btn = QPushButton()
             icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
             self.popup_btn.setIcon(icon)
@@ -1079,35 +1087,42 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.popup_btn.setFixedSize(40, 40)
 
             self.nav_layout.addStretch()
+
             self.nav_layout.addWidget(self.popup_btn)
 
             self.layout.addLayout(self.nav_layout)
 
-            # Create canvas widgets
-            self.canvas0 = FigureCanvas(Figure(figsize=(8,4)))
-            self.canvas1 = FigureCanvas(Figure(figsize=(7.5,8)))
-            self.canvas = FigureCanvas(Figure(figsize=(8,8)))
+            self.toolbar_layout.addWidget(self.toolbar1)
+            self.toolbar_layout.addWidget(self.toolbar2)
+            self.layout.addLayout(self.toolbar_layout)
 
-            # Create toolbars
-            self.toolbar1 = NavigationToolbar(self.canvas, self)
-            self.toolbar2 = NavigationToolbar(self.canvas1, self)
+            self.left_btn.clicked.connect(self.show_previous_figure)
+            self.right_btn.clicked.connect(self.show_next_figure)
 
-            toolbar_layout = QHBoxLayout()
-            toolbar_layout.addWidget(self.toolbar1)
-            toolbar_layout.addWidget(self.toolbar2)
-            self.layout.addLayout(toolbar_layout)
+            if self.interaction_class:
+                self.interact_btn.clicked.connect(self.interact)
 
-            # Add canvases
-            self.layout.addWidget(self.canvas0)
-
+            # Canvas
             self.fig_layout = QHBoxLayout()
+
+            if self.labels:
+                self.current_data()
+                figure0 = self.create_figure(plot='geomShort')
+                self.canvas0 = FigureCanvas(figure0)
+
+                figure1 = self.create_figure(plot='seismogram', **self.seis_kwargs)
+                self.canvas1 = FigureCanvas(figure1)
+
+                figure2 = self.create_figure()
+                self.canvas = FigureCanvas(figure2)
+                self.canvas.setFocusPolicy(Qt.StrongFocus)
+                self.canvas.setFocus()
+
             self.fig_layout.addWidget(self.canvas)
             self.fig_layout.addWidget(self.canvas1)
-            self.layout.addLayout(self.fig_layout)
 
-            # set focus and initial state:
-            self.canvas.setFocusPolicy(Qt.StrongFocus)
-            self.canvas.setFocus()
+            self.layout.addWidget(self.canvas0)
+            self.layout.addLayout(self.fig_layout)
 
         except Exception as e:
             self.logger.exception(f"UI initialization failed: {e}")
@@ -1123,7 +1138,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         sin, rep, wid = label
         try:
             stream = self.select_data(sin, rep)
-            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
+            self.data_exists, stream = self._set_data(stream, sin, rep, self.procset, wid)
 
             # Load FK filter
             params = {'sin': sin, 'rep': rep,
@@ -1134,6 +1149,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
             if not points.empty:
                 pt, pb = filter_df2dict(points)
+
                 for pts, key2 in zip([pt, pb], ["t", "b"]):
                     stream.apply_fk_filter(pts, key2)
 
@@ -1165,64 +1181,87 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         """Update all canvases, toolbars, labels, and interactor."""
 
         try:
-            if self.interactor and getattr(self.interactor, "points", None):
+            # Store points from previous session
+            if self.interactor and getattr(self.interactor, 'points', None):
                 self.points[self.current_index] = self.interactor.points
 
+            # enable/disable navigation buttons
+            num_figures = len(self.labels)
+            is_navigation_enabled = num_figures > 1
+            self.left_btn.setEnabled(is_navigation_enabled)
+            self.right_btn.setEnabled(is_navigation_enabled)
+
             self.current_data()
-            label = self.labels[self.current_index]
+            figure0 = self.create_figure(plot='geomShort')
+            figure1 = self.create_figure(plot='seismogram', **self.seis_kwargs)
+            figure = self.create_figure()
 
+            # update label
             if not self.is_grouped:
-                sin, rep, win = label
-                self.label.setText(f"SIN {sin} | REP {rep}")
+                label = self.labels[self.current_index]
+                if not figure0:
+                    self.label.setText(f"SIN {label[0]} | REP {label[1]} | No data")
+                else:
+                    self.label.setText(f"SIN {label[0]} | REP {label[1]}")  # + " | " + self.active_label)
             else:
-                sin, rep, win = label
-                self.label.setText(f"SIN {sin} | REP {rep} | WIN {win + 1}")
+                if not figure0:
+                    self.label.setText(f"No data")
+                else:
+                    label = self.labels[self.current_index]
+                    self.label.setText(
+                        f"SIN {label[0]} | REP {label[1]} | WIN {label[2] + 1}")  # + " | " + self.active_label)
 
-            if not self.data_exists:
-                # clear canvases if necessary
-                for cvs in (self.canvas0, self.canvas1, self.canvas):
-                    cvs.figure.clf()
-                    cvs.draw_idle()
+            # figure0.tight_layout()
+            if not figure0:
+                self.canvas0 = self.create_placeholder(self.canvas0)
+                self.canvas1 = self.create_placeholder(self.canvas1)
+                self.canvas = self.create_placeholder(self.canvas)
                 return
 
-            fig0 = self.create_figure(plot='geomShort')
-            fig1 = self.create_figure(plot='seismogram', **self.seis_kwargs)
-            fig = self.create_figure()
+            # Replace canvas
+            self.canvas0 = self.replace_widget(self.canvas0, figure0)
+            self.canvas1 = self.replace_widget(self.canvas1, figure1)
+            self.canvas = self.replace_widget(self.canvas, figure)
 
-            # Copy old canvas size
-            size0 = self.canvas0.figure.get_size_inches()
-            size1 = self.canvas1.figure.get_size_inches()
-            size = self.canvas.figure.get_size_inches()
+            # Reset toolbar
+            for tb, c in [(self.toolbar1, self.canvas), (self.toolbar2, self.canvas1)]:
+                self.layout.removeWidget(tb)
+                tb.setParent(None)
 
-            fig0.set_size_inches(size0, forward=True)
-            fig1.set_size_inches(size1, forward=True)
-            fig.set_size_inches(size, forward=True)
+            self.toolbar1 = NavigationToolbar(self.canvas, self.canvas)
+            self.toolbar2 = NavigationToolbar(self.canvas1, self.canvas1)
+            self.toolbar_layout = QHBoxLayout()
+            self.toolbar_layout.addWidget(self.toolbar1)
+            self.toolbar_layout.addWidget(self.toolbar2)
+            self.layout.addLayout(self.toolbar_layout)
 
-            self.canvas0.figure = fig0
-            self.canvas1.figure = fig1
-            self.canvas.figure = fig
+            self.canvas.setFocusPolicy(Qt.StrongFocus)
+            self.canvas.setFocus()
+            self.canvas.setEnabled(self.data_exists)
 
-            self.canvas0.draw_idle()
-            self.canvas1.draw_idle()
-            self.canvas.draw_idle()
+            self.fig_layout = QHBoxLayout()
+            self.fig_layout.addWidget(self.canvas)
+            self.fig_layout.addWidget(self.canvas1)
+            self.layout.addWidget(self.canvas0)
+            self.layout.addLayout(self.fig_layout)
 
-            self.toolbar1.update()
-            self.toolbar2.update()
-
+            # Setup interaction
             self.interactor = None
-            if self.interaction_class and self.data_exists:
-                ax = fig.axes[0]
+            if (self.interaction_class is not None) and self.data_exists:
+                ax = figure.axes[0]
                 points = self.points.get(self.current_index, {})
                 picks = self.picks.get(self.current_index, {})
-                self.interactor = self.interaction_class(
-                    ax, points=points, data=self.stream,
-                    picks=picks, **self._interact_kwargs
-                )
+
+                self.interactor = self.interaction_class( ax, points=points, data=self.stream,
+                                                          picks=picks, **self._interact_kwargs )
+
+                # if self.interactor.picks:
                 self.points[self.current_index] = self.interactor.points
                 self.picks[self.current_index] = self.interactor.picks
 
         except Exception as e:
             self.logger.exception(f"Error updating display: {e}")
+
 
     def interact(self):
         """Apply FK filter based on interaction points."""
@@ -1243,7 +1282,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
             else:
                 # Reset to original
-                self._set_data(self.stream, label[0], label[1], self.procset, label[2])
+                #self._set_data(self.stream, label[0], label[1], self.procset, label[2])
 
                 # delete filter
                 params = {'sin': label[0], 'rep': label[1], 'procset': "'%s'" % self.procset, 'wid':label[2]}
@@ -1270,7 +1309,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             sin, rep, wid = label
 
             stream = self.select_data(sin, rep)
-            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
+            self.data_exists,stream = self._set_data(stream, sin, rep, self.procset, wid)
 
             # Load FK filter
             params = {'sin': sin, 'rep': rep,

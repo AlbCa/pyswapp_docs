@@ -1449,6 +1449,7 @@ class SeismicStream:
         amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
 
+        # TODO fix weird bug in pygt5 app
         self.plot('FK', show = False)
 
     def reset_FK(self):
@@ -2524,7 +2525,7 @@ class SeismicStream:
 
         return fig
 
-    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True, gui = False, **kwargs):
+    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True, gui = False, points = None, **kwargs):
         """plot FK image"""
 
         figsize = kwargs.pop('figsize', (8, 8))
@@ -2539,6 +2540,11 @@ class SeismicStream:
         else:
             ax = axes
             fig = ax.figure
+
+        if points is not None:
+            pt, pb = filter_df2dict(points)
+            for pts, key2 in zip([pt, pb], ["t", "b"]):
+                self.apply_fk_filter(pts, key2)
 
         if FK_data is None:
             FK_data, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
