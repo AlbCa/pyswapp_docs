@@ -1153,7 +1153,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
                 for pts, key2 in zip([pt, pb], ["t", "b"]):
                     stream.apply_fk_filter(pts, key2)
 
-            self.stream = copy.deepcopy(stream)
+            self.stream = stream
 
         except Exception as err:
             self.logger.error(f"Error setting data: {err}")

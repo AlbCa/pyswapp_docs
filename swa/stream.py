@@ -666,7 +666,7 @@ class SeismicStream:
                 st_proc[i].data = amps[i]
                 st_proc[i].stats.npts = len(amps[i])
 
-        self._pst = st_proc
+        self._pst = st_proc.copy()
 
     def resample(self, sampling_rate, window='hann', no_filter=True, strict_length=False):
         """resample data in all traces using the method from obspy method"""
@@ -1449,8 +1449,7 @@ class SeismicStream:
         amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
 
-        # TODO fix weird bug in pygt5 app
-        self.plot('FK', show = False)
+        self._add_fk_data_to_dict(FK_filt, theta, kw, freq, iX, iT)
 
     def reset_FK(self):
         """Reset FK filter"""
