@@ -28,25 +28,59 @@ swam = BaseManager(f'{prj_dir}/proc/0b_basics', # project directory path
 #swam = BaseManager(f'{prj_dir}/proc/test') # project directory path
 
 # %% 3. interact with the data
-# load data from database based on existing procset label
+
+# 3.1 load data from database based on existing procset label
 #swam.load_procset('raw')
 
-# set a new procset label
+# 3.2 set a new procset label
 procset = 'proc1' # processing set label
 swam.set_procset_label(procset)
 
-# select data
+# 3.3 select data
 swam.select_data(sin=1, rep=1, inplace=True)
 
-# preprocess the data
-# trim by offset
-processing_kwargs = {'min': 2, 'max': 26, 'which': 'reverse'} # arguments for the processing
-swam.preprocess(type='trim',by = 'offset',**processing_kwargs)
+# 3.4 preprocess data
+# Cut traces outside of offset limits considering forward, reverse or both offset shots
+swam.preprocess(type = 'trim', by = 'offset', min = 5, max = 10, which = 'both')
 
-# remove zero amplitude data
-swam.preprocess(type='check_traces')
+# # remove zero amplitude data
+# swam.preprocess(type='check_traces')
 
-# plot selected data
+# # Cut recording time
+# swam.preprocess(type = 'trim', by = 'time', min = 0, max = 0.5)
+
+# # Select traces with specified geophone separation
+# swam.preprocess(type = 'trim', by = 'separation', dx=2)
+
+# # Select traces within a window defined by window midpoint (xmid) and window length (number of traces)
+# swam.preprocess(type = 'trim', by = 'window', xmid = 25, wlen = 20)
+
+# # Select traces
+# swam.preprocess(type = 'trim', by = 'select', trace_ids = [1,2,3])
+
+# # Remove traces
+# swam.preprocess(type = 'trim', by = 'remove', trace_ids = [1,2,3])
+
+# # Apply bandpass, lowpass or highpass frequency filtering
+# swam.preprocess(type = 'filter', by = 'frequency', min = 5, max = 20, filter_type = 'bandpass')
+
+# # Apply linear move-out with specified velocity
+# swam.preprocess(type = 'filter', by = 'lmo', velocity = 100, bulk_shift = 0)
+
+# # Mute amplitudes of selected traces
+# swam.preprocess(type = 'filter', by = 'mute', trace_ids = [1,2,3])
+
+# # Reverse polarity of selected traces
+# swam.preprocess(type = 'filter', by = 'reverse_polarity', trace_ids = [1,2,3])
+
+# # Apply Hamming window
+# swam.preprocess(type = 'filter', by = 'taper')
+
+# %% 4. view data
+# 4.1 Data viewer
+swam.gui_view()
+
+# 4.2 create single plot of currently selected data
 swam.plot('geometry')
 swam.plot('seismogram', amp_scale = 1, color = 'k')
 swam.plot('FK')
@@ -54,27 +88,25 @@ swam.plot('spectra')
 swam.plot('spectrogram')
 swam.plot('SFR')
 
+# %% 5. wave field transformation
 # perform wavefield transformation based on the phaseshift and fdbf methods
 swam.transform(method = 'phaseshift')
 swam.transform(method = 'fdbf')
 swam.plot('FV', method = 'phaseshift')
 swam.plot('FV', method = 'fdbf')
 
-# %% VIEWER
-# figure viewer
-# accepted keys: ['seismogram','','spectrogram','spectra','FK','SFR','dispersionImage','FV', 'curve']
-swam.gui_view() # seismogram as default
 
-# %% INTERACTOR
+# %% 6. Interactive viewer
 # filter data in FK-domain
-swam.gui_interact('FK', taper_length = 10000)
+swam.gui_interact('FK')
 
 # pick dispersion curves in FV-domain
 swam.gui_interact('FV')
 
-swam.plot('curve')
-swam.plot('pseudosection')
+swam.plot('curve', method = 'phaseshift')
+swam.plot('pseudosection', method = 'phaseshift')
 
+# %% 7. automatic dispersion curve extraction
 # automatic dispersion curve extraction using MOPA
 swam.extract(method = 'MOPA')
 swam.plot('curve', method = 'MOPA')
@@ -82,20 +114,3 @@ swam.plot('curve', method = 'MOPA')
 # automatic dispersion curve extraction using max
 swam.extract(method = 'max')
 swam.plot('curve', method = 'max')
-
-# points_top, points_bot = swam.read_filter('FK')
-# swam.apply_filter('FK', points_top,points_bot, procset = 'proc1')
-#
-# swam.plot('FK',procset = 'proc1')
-# swam.plot('FK',procset = 'test')
-
-#swam.preprocess(type='filter',by = 'FK',fname = '../data/syn_data/testing/FKfilter.txt')
-
-
-# # # automatic dispersion curve extraction using trafo and max
-# # # (INFO regarding a modification here: initially you could apply the max extraction method to
-# # # both wavefield transformation methods and access the dispersion curves via method = '<trafo_type>_max'
-# # # I changed it now so that you only store the data using the identifier method = 'max', analogue to the use of MOPA
-# # # --> it's probably sufficient and less confusing and you can still decide to which trafo method you wish to apply it
-# # swam.extract(method = 'max') # method here can be 'max' or the trafo method
-# # swam.plot_curve(method = 'max')
