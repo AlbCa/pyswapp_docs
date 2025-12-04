@@ -646,7 +646,10 @@ class BaseManager:
             procset = self._procset
 
         sin, rep = self.selected_ids
+        if self.current_stream is None:
+            self.select_data(inplace=True, verbose=False)
         stream = self.current_stream
+
 
         wids = self._sql.get_wids(sin, rep, procset)
         wids = wids if (wids and use_windows) else [-1]
@@ -783,8 +786,6 @@ class BaseManager:
 
         if curve_data.empty:
             return None
-        else:
-            print(curve_data)
 
         dc = DispersionCurve()
         dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])

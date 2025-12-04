@@ -1491,7 +1491,14 @@ class SeismicStream:
         self.frequency = freq
 
     def _steering_vector(self,kx,steering = 'cylindrical',sign = -1):
-        """set of phase delays (Zywicki, 1999)"""
+        """set of phase delays
+
+        References
+        ----------
+        Zywicki, D.J., 1999. Advanced signal processing methods applied
+        to engineering analysis of seismic surface289
+        waves, Ph.D. dissertation, Georgia Institute of Technology.
+        """
         if steering == 'cylindrical':
             # cylindrical steering vector exp(-1j[phi(H0(kx))])
             # H0 ... Hankel function Hn = Jn + i Yn
@@ -1568,7 +1575,14 @@ class SeismicStream:
         self.wavenumber = ks
 
     def _rfest(self, u):
-        """spatiospectral correlation matrix (Zywicki, 1999)"""
+        """spatiospectral correlation matrix
+
+        References
+        ----------
+        Zywicki, D.J., 1999. Advanced signal processing methods applied
+        to engineering analysis of seismic surface289
+        waves, Ph.D. dissertation, Georgia Institute of Technology.
+        """
 
         # unpack dimensions
         iX, iF, nblocks = u.shape
@@ -1582,7 +1596,14 @@ class SeismicStream:
         return np.einsum("ifk,jfk->ijf", u_weighted, u_weighted.conj()) / nblocks
 
     def _fdbf(self, steering = 'cylindrical'):
-        """frequency-domain beamforming (Zywicki, 1999)"""
+        """frequency-domain beamforming (Zywicki, 1999)
+
+        References
+        ----------
+        Zywicki, D.J., 1999. Advanced signal processing methods applied
+        to engineering analysis of seismic surface289
+        waves, Ph.D. dissertation, Georgia Institute of Technology.
+        """
 
         self.dispersive_energy = None
         self.velocity = None
@@ -1657,6 +1678,162 @@ class SeismicStream:
         self.dispersive_energy = V
         self.velocity = vels
         self.wavenumber = ks
+
+    def _cos_taper(self, x, frac=0.05):
+        """
+        Apply a cosine taper (like MATLAB's cos_taper) to a 1D array.
+        frac is the taper fraction (default 5% at each end).
+        """
+        n = len(x)
+        m = int(frac * n)
+        w = np.ones(n)
+
+        if m > 0:
+            t = np.linspace(0, np.pi / 2, m)
+            w[:m] = np.sin(t) ** 2
+            w[-m:] = w[:m][::-1]
+
+        return x * w
+
+    # def _inverse_radon(self, t, delta, M, p, weights, ref_dist,
+    #                        line_model='linear',
+    #                        inversion_model='L2',
+    #                        hyperparameters=None):
+    #     """
+    #     References
+    #     ----------
+    #     Schultz, R., Gu, Y. J., 2012. Flexible, inversion-based Matlab
+    #     implementation of the Radon Transform.  Computers and
+    #     Geosciences 52, 437-442, doi: 10.1016/j.cageo.2012.08.013.
+    #
+    #     An, Y., Gu, Y. J., Sacchi, M., 2007. Imaging mantle
+    #     discontinuities using least-squares Radon transform.
+    #     Journal of Geophysical Research 112, B10303,
+    #     doi: 10.1029/2007JB005009.
+    #     """
+    #
+    #     # Apply cosine taper to each trace
+    #     M = M.copy()
+    #     for ii in range(M.shape[0]):
+    #         M[ii, :] = cos_taper(M[ii, :])
+    #
+    #     # Basic sizes
+    #     it = len(t)
+    #     iF = 2 ** (int(np.ceil(np.log2(it))) + 1)  # same as pow2(nextpow2 + 1)
+    #     iDelta = len(delta)
+    #     ip = len(p)
+    #     iw = len(weights)
+    #
+    #     # Dimension checks
+    #     if M.shape != (iDelta, it):
+    #         raise ValueError("size(M) must be [len(delta), len(t)]")
+    #
+    #     if iw != iDelta:
+    #         raise ValueError("len(weights) must equal len(delta)")
+    #
+    #     # Hyperparameters check
+    #     if inversion_model.upper() in ['L1', 'CAUCHY']:
+    #         if len(hyperparameters) != 2:
+    #             raise ValueError("L1 and Cauchy require two hyperparameters")
+    #     else:  # default L2
+    #         if len(hyperparameters) != 1:
+    #             raise ValueError("L2 requires one hyperparameter")
+    #
+    #     # Allocate outputs
+    #     R = np.zeros((ip, it))
+    #     Rfft = np.zeros((ip, iF), dtype=complex)
+    #
+    #     # Distance array
+    #     Dist_array = delta - ref_dist
+    #     dF = 1 / (t[0] - t[1])
+    #     Mfft = fft(M, n=iF, axis=1)
+    #     W = spdiags(weights, 0, iDelta, iDelta)
+    #
+    #     # Build Tshift matrix
+    #     Tshift = np.zeros((iDelta, ip))
+    #
+    #     # Populate Tshift = p * distance (linear case)
+    #     for k in range(ip):
+    #         if line_model.lower() == 'parabolic':
+    #             Tshift[:, k] = (2 * ref_dist * p[k] * Dist_array +
+    #                             p[k] * Dist_array ** 2)
+    #         else:
+    #             Tshift[:, k] = p[k] * Dist_array
+    #
+    #     # Identity in sparse form
+    #     Ident = speye(ip)
+    #
+    #     # Frequency loop
+    #     fvec = np.zeros(iF // 2 + 1)
+    #
+    #     for i in range((iF + 1) // 2):
+    #
+    #         f = (i / iF) * dF
+    #         fvec[i] = -f
+    #
+    #         # Time-shift matrix
+    #         A = np.exp(2j * np.pi * f * Tshift)
+    #
+    #         # AtA and AtM
+    #         AtA = A.T.conj() @ (W @ A)
+    #         AtM = A.T.conj() @ (W @ Mfft[:, i])
+    #
+    #         mu = np.abs(np.trace(AtA)) * hyperparameters[0]
+    #
+    #         # Solve L2 first
+    #         Rfft[:, i] = np.linalg.solve(AtA + mu * Ident.toarray(), AtM)
+    #
+    #         # ----- IRLS for L1 / Cauchy -----
+    #         if inversion_model.upper() in ['L1', 'CAUCHY']:
+    #
+    #             b = hyperparameters[1]
+    #             lam = mu * b
+    #
+    #             # Initial cost
+    #             Rcur = Rfft[:, i]
+    #
+    #             if inversion_model.upper() == 'CAUCHY':
+    #                 cost_prev = (np.linalg.norm(Mfft[:, i] - A @ Rcur, 2) +
+    #                              lam * np.sum(np.log(np.abs(Rcur) ** 2 + b)))
+    #             else:  # L1
+    #                 cost_prev = (np.linalg.norm(Mfft[:, i] - A @ Rcur, 1) +
+    #                              lam * np.linalg.norm(np.abs(Rcur) + b, 2))
+    #
+    #             for _ in range(20):
+    #                 if inversion_model.upper() == 'CAUCHY':
+    #                     Q = spdiags(1.0 / (np.abs(Rcur) ** 2 + b), 0, ip, ip)
+    #                 else:  # L1
+    #                     Q = spdiags(1.0 / (np.abs(Rcur) + b), 0, ip, ip)
+    #
+    #                 # Solve (lam*Q + AtA) x = AtM
+    #                 Rnew = np.linalg.solve(AtA + lam * Q.toarray(), AtM)
+    #
+    #                 # Compute cost
+    #                 if inversion_model.upper() == 'CAUCHY':
+    #                     cost = (np.linalg.norm(Mfft[:, i] - A @ Rnew, 2) +
+    #                             lam * np.sum(np.log(np.abs(Rnew) ** 2 + b)))
+    #                 else:
+    #                     cost = (np.linalg.norm(Mfft[:, i] - A @ Rnew, 1) +
+    #                             lam * np.linalg.norm(np.abs(Rnew) + b, 2))
+    #
+    #                 # Check convergence
+    #                 dcost = 2 * abs(cost - cost_prev) / (abs(cost) + abs(cost_prev))
+    #                 Rcur = Rnew
+    #                 cost_prev = cost
+    #
+    #                 if dcost < 0.001:
+    #                     break
+    #
+    #             Rfft[:, i] = Rcur
+    #
+    #         # Fill negative frequencies using Hermitian symmetry
+    #         if i != 0:
+    #             Rfft[:, iF - i] = np.conj(Rfft[:, i])
+    #
+    #     # Inverse FFT to get R(t)
+    #     R = ifft(Rfft, axis=1).real[:, :it]
+    #
+    #     return R, Rfft, fvec
 
     def _MOPA(self,std=None,rel_err=None,abs_err=None,stopAtChi2=2,**kwargs):
         """Multi-offset phase analysis (MOPA; Strobbia & Foti, 2014)."""
@@ -1770,8 +1947,8 @@ class SeismicStream:
                 "phase": ph_raw[off0 - 1:],  # raw phase for plotting only
                 "k0": k0,
                 "phi0": phi0,
-                "freq": freq[idx_out],
-                "vel": 2 * np.pi * freq[idx_out] / k0,
+                "frequency": freq[idx_out],
+                "velocity": 2 * np.pi * freq[idx_out] / k0,
                 "chi2": chi2,
             }
 
@@ -2866,7 +3043,7 @@ class SeismicStream:
             ax = axes
             fig = axes.figure
 
-        cmap = kwargs.pop('cmap', 'viridis')
+        cmap = kwargs.pop('cmap', 'Greys')
         cmap_discret = getattr(plt.cm, cmap)
 
         colors = cmap_discret(np.linspace(0, 0.9, len(np.arange(len(data)))))
@@ -2901,7 +3078,7 @@ class SeismicStream:
                 ec = 'k'
                 label = f'MOPA - chi^2 <= {stop}'
 
-            ax[2].scatter(data[ii]['freq'], data[ii]['vel'], marker="o", s=25, c=colors[len(colors) // 2].reshape(1, -1),
+            ax[2].scatter(data[ii]['frequency'], data[ii]['velocity'], marker="o", s=25, c=colors[len(colors) // 2].reshape(1, -1),
                           edgecolor=ec, linewidth=0.8, zorder=2,
                           label=label, alpha=0.7)
 
