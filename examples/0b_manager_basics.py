@@ -30,7 +30,7 @@ swam = BaseManager(f'{prj_dir}/proc/0b_basics', # project directory path
 # %% 3. interact with the data
 
 # 3.1 load data from database based on existing procset label
-swam.load_procset('raw')
+# swam.load_procset('raw')
 
 # 3.2 set a new procset label
 procset = 'proc1' # processing set label
@@ -42,69 +42,69 @@ swam.select_data(sin=1, rep=1, inplace=True)
 # 3.4 preprocess data
 # Cut traces outside of offset limits considering forward, reverse or both offset shots
 swam.preprocess(type = 'trim', by = 'offset', min = 5, max = 1e6, which = 'both')
-#
-# # # remove zero amplitude data
-# # swam.preprocess(type='check_traces')
-#
-# # # Cut recording time
-# # swam.preprocess(type = 'trim', by = 'time', min = 0, max = 0.5)
-#
-# # # Select traces with specified geophone separation
-# # swam.preprocess(type = 'trim', by = 'separation', dx=2)
-#
-# # # Select traces within a window defined by window midpoint (xmid) and window length (number of traces)
-# # swam.preprocess(type = 'trim', by = 'window', xmid = 25, wlen = 20)
-#
-# # # Select traces
-# # swam.preprocess(type = 'trim', by = 'select', trace_ids = [1,2,3])
-#
-# # # Remove traces
-# # swam.preprocess(type = 'trim', by = 'remove', trace_ids = [1,2,3])
-#
-# # # Apply bandpass, lowpass or highpass frequency filtering
-# # swam.preprocess(type = 'filter', by = 'frequency', min = 5, max = 20, filter_type = 'bandpass')
-#
-# # # Apply linear move-out with specified velocity
-# # swam.preprocess(type = 'filter', by = 'lmo', velocity = 100, bulk_shift = 0)
-#
-# # # Mute amplitudes of selected traces
-# # swam.preprocess(type = 'filter', by = 'mute', trace_ids = [1,2,3])
-#
-# # # Reverse polarity of selected traces
-# # swam.preprocess(type = 'filter', by = 'reverse_polarity', trace_ids = [1,2,3])
-#
-# # # Apply Hamming window
-# # swam.preprocess(type = 'filter', by = 'taper')
-#
-# # %% 4. view data
-# # 4.1 Data viewer
-# swam.gui_view()
-#
-# # 4.2 create single plot of currently selected data
-# swam.plot('geometry')
-# swam.plot('seismogram', amp_scale = 1, color = 'k')
-# swam.plot('FK')
-# swam.plot('spectra')
-# swam.plot('spectrogram')
-# swam.plot('SFR')
-#
-# # %% 5. wave field transformation
-# # perform wavefield transformation based on the phaseshift and fdbf methods
-# swam.transform(method = 'phaseshift')
-# swam.transform(method = 'fdbf')
-# swam.plot('FV', method = 'phaseshift')
-# swam.plot('FV', method = 'fdbf')
-#
-#
-# # %% 6. Interactive viewer
-# # filter data in FK-domain
-# swam.gui_interact('FK')
-#
-# # pick dispersion curves in FV-domain
-# swam.gui_interact('FV')
-#
-# swam.plot('curve', method = 'phaseshift')
-# swam.plot('pseudosection', method = 'phaseshift')
+
+# # remove zero amplitude data
+# swam.preprocess(type='check_traces')
+
+# # Cut recording time
+# swam.preprocess(type = 'trim', by = 'time', min = 0, max = 0.5)
+
+# # Select traces with specified geophone separation
+# swam.preprocess(type = 'trim', by = 'separation', dx=2)
+
+# # Select traces within a window defined by window midpoint (xmid) and window length (number of traces)
+# swam.preprocess(type = 'trim', by = 'window', xmid = 25, wlen = 20)
+
+# # Select traces
+# swam.preprocess(type = 'trim', by = 'select', trace_ids = [1,2,3])
+
+# # Remove traces
+# swam.preprocess(type = 'trim', by = 'remove', trace_ids = [1,2,3])
+
+# # Apply bandpass, lowpass or highpass frequency filtering
+# swam.preprocess(type = 'filter', by = 'frequency', min = 5, max = 20, filter_type = 'bandpass')
+
+# # Apply linear move-out with specified velocity
+# swam.preprocess(type = 'filter', by = 'lmo', velocity = 100, bulk_shift = 0)
+
+# # Mute amplitudes of selected traces
+# swam.preprocess(type = 'filter', by = 'mute', trace_ids = [1,2,3])
+
+# # Reverse polarity of selected traces
+# swam.preprocess(type = 'filter', by = 'reverse_polarity', trace_ids = [1,2,3])
+
+# # Apply Hamming window
+# swam.preprocess(type = 'filter', by = 'taper')
+
+# %% 4. view data
+# 4.1 Data viewer
+swam.gui_view()
+
+# 4.2 create single plot of currently selected data
+swam.plot('geometry')
+swam.plot('seismogram', amp_scale = 1, color = 'k')
+swam.plot('FK')
+swam.plot('spectra')
+swam.plot('spectrogram')
+swam.plot('SFR')
+
+# %% 5. wave field transformation
+# perform wavefield transformation based on the phaseshift and fdbf methods
+swam.transform(method = 'phaseshift')
+swam.transform(method = 'fdbf')
+swam.plot('FV', method = 'phaseshift')
+swam.plot('FV', method = 'fdbf')
+
+
+# %% 6. Interactive viewer
+# filter data in FK-domain
+swam.gui_interact('FK')
+
+# pick dispersion curves in FV-domain
+swam.gui_interact('FV')
+
+swam.plot('curve', method = 'phaseshift')
+swam.plot('pseudosection', method = 'phaseshift')
 
 # %% 7. automatic dispersion curve extraction
 # automatic dispersion curve extraction using MOPA
@@ -112,11 +112,11 @@ swam.extract(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01, showResults =  Tru
 swam.plot('curve', method = 'MOPA')
 
 # automatic dispersion curve extraction using max
-# swam.extract(method = 'max')
-# swam.plot('curve', method = 'max')
-#
-# # save curves to disk
-# swam.save(method = 'fdbf')
-# swam.save(method = 'phaseshift')
-# swam.save(method = 'MOPA')
-# swam.save(method = 'max')
+swam.extract(method = 'max')
+swam.plot('curve', method = 'max')
+
+# save curves to disk
+swam.save(method = 'fdbf')
+swam.save(method = 'phaseshift')
+swam.save(method = 'MOPA')
+swam.save(method = 'max')
