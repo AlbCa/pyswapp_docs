@@ -372,10 +372,10 @@ class DataSwitcherBase(QWidget):
         if amps is not None:
             amps_ari = amps.transpose()
             data.update_pst(amps_ari, sht, recs, par)
-            return True, data
+            return True
         else:
             #self.logger.warning('No data.')
-            return False, None
+            return False
 
     def _set_FV(self, data, sin, rep, procset, wid=-1, method='phaseshift'):
         """set FV data from database to current stream"""
@@ -410,7 +410,7 @@ class DataSwitcherBase(QWidget):
 
         try:
             self.stream = self.select_data(label[0], label[1])
-            self.data_exists,_ = self._set_data(self.stream, label[0], label[1], procset, label[2])
+            self.data_exists = self._set_data(self.stream, label[0], label[1], procset, label[2])
         except Exception as err:
             self.logger.error(f"Error setting data: {err}")
             return None
@@ -420,7 +420,7 @@ class DataSwitcherBase(QWidget):
             try:
                 FV_flag = self._set_FV(self.stream, label[0], label[1], procset,
                                        method=self.method, wid=label[2])
-                self.data_exists,_ = self.data_exists and FV_flag
+                self.data_exists = self.data_exists and FV_flag
             except Exception as err:
                 self.logger.error(f"Error in FV setup: {err}")
                 return None
@@ -857,14 +857,17 @@ class DataSwitcherPick(DataSwitcherBase):
     def show_popup(self):
         """Help popup with keyboard shortcuts."""
         text = "\n".join((
+            r'Left mouse click in dispersion image: add a point with a confidence interval.'
+            r'Left mouse click and hold: Drag added point.'
+            r'Right mouse click on point: delete point.'
             r'Press numbers 0–9 to set dispersion curve mode index.',
             r'Press d: Delete boundary.',
             r'Press r: Reset picks.',
-            r'Scroll: Adjust boundary tightness.'
+            r'Mouse Scroll: Adjust boundary tightness.'
         ))
 
         msg = QMessageBox()
-        msg.setWindowTitle('Keyboard commands')
+        msg.setWindowTitle('Information')
         msg.setText(text)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
@@ -888,8 +891,8 @@ class DataSwitcherPick(DataSwitcherBase):
 
             picks = {
                 mode: {
-                    'f': group['frequency'].to_numpy(),
-                    'v': group['velocity'].to_numpy()
+                    'frequency': group['frequency'].to_numpy(),
+                    'velocity': group['velocity'].to_numpy()
                 }
                 for mode, group in curves.groupby('dc_mode')
             }
@@ -929,10 +932,10 @@ class DataSwitcherPick(DataSwitcherBase):
                 dc = {
                     'xmid': self.stream.midpoint,
                     'method': self.method,
-                    'dc_mode': dc_mode,
-                    'f': pv['f'],
-                    'v': pv['v'],
-                    'err': np.zeros(len(pv['v'])),
+                    'dc_mode': int(dc_mode),
+                    'frequency': pv['frequency'],
+                    'velocity': pv['velocity'],
+                    'error': np.zeros(len(pv['velocity'])),
                 }
 
                 self._sql.write_curve(
@@ -1010,6 +1013,15 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
         self.canvas1 = FigureCanvas()
         self.seis_kwargs = {'show_xticks': False, 'title': None, 'figsize': (7.2, 8)}
+
+        # apply the FK filter to the data after closing the window
+        self._apply_filter = kwargs.pop('apply_filter', True)
+
+        # unique filter exists for each rep
+        self._uniq_per_rep = kwargs.pop('uniq_per_rep', True)
+
+        # unique filter exists for each wid
+        self._uniq_per_wid = kwargs.pop('uniq_per_wid', True)
 
         interaction_class = FKFilterInteractive
 
@@ -1138,12 +1150,18 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         sin, rep, wid = label
         try:
             stream = self.select_data(sin, rep)
-            self.data_exists, stream = self._set_data(stream, sin, rep, self.procset, wid)
+            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
 
             # Load FK filter
-            params = {'sin': sin, 'rep': rep,
+            params = {'sin': sin,
                       'procset': "'%s'" % self.procset,
-                      'wid': wid, 'type': "'%s'" % 'FK'}
+                      'type': "'%s'" % 'FK'}
+
+            if self._uniq_per_rep:
+                params['rep'] = rep
+
+            if self._uniq_per_wid:
+                params['wid'] = wid
 
             points = self._sql.read_filter(params)
 
@@ -1296,9 +1314,14 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
     def show_popup(self):
         """Show keyboard shortcuts for FK filter."""
-        text = "Press t for top or b for bottom filter."
+        text = "\n".join((
+            r'Left mouse click in FK plot: add a point.'
+            r'Left mouse click and hold: drag added point.'
+            r'Right mouse click on point: delete point.'
+            r'Press t for top or b for bottom filter.'
+        ))
         msg = QMessageBox()
-        msg.setWindowTitle('Keyboard commands')
+        msg.setWindowTitle('Information')
         msg.setText(text)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
@@ -1309,12 +1332,18 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             sin, rep, wid = label
 
             stream = self.select_data(sin, rep)
-            self.data_exists,stream = self._set_data(stream, sin, rep, self.procset, wid)
+            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
 
             # Load FK filter
-            params = {'sin': sin, 'rep': rep,
+            params = {'sin': sin,
                       'procset': "'%s'" % self.procset,
-                      'wid': wid, 'type': "'%s'" % 'FK'}
+                      'type': "'%s'" % 'FK'}
+
+            if self._uniq_per_rep:
+                params['rep'] = rep
+
+            if self._uniq_per_wid:
+                params['wid'] = wid
 
             points = self._sql.read_filter(params)
 
@@ -1327,7 +1356,8 @@ class DataSwitcherFilterFK(DataSwitcherBase):
 
     def closeEvent(self, event):
 
-        self.apply_filter()
+        if self._apply_filter:
+            self.apply_filter()
         event.accept()
 
     def clean(self):
@@ -1476,10 +1506,10 @@ class CurveFilter(QWidget):
     def show_popup(self):
 
         text = '\n'.join((
-            '1. Draw a polygon by left click on the figure.',
+            '1. Draw a polygon by left click on the figure to add polygon edges.',
             '2. Once a closed polygon is drawn, points within will be marked.',
             '3. After marking all points, close App to remove marked points.',
-            '4. Press button Cancel to cancel selection in current plot.'))
+            '4. Press button Cancel to cancel selection in current canvas.'))
 
         msg = QMessageBox()
         msg.setWindowTitle("Information")

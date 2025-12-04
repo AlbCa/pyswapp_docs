@@ -46,6 +46,14 @@ class BaseManager:
 
         self.path2db = os.path.join(self.prjdir, self.database)
 
+        # overwrite database if it exists to create new project
+        if overwrite:
+            try:
+                os.remove(self.database)
+                self.logger.info(f'SQL database {self.database} deleted.')
+            except OSError:
+                pass
+
         # create/load project
         if os.path.isfile(self.path2db):
             self._load_project(**kwargs)
@@ -408,38 +416,57 @@ class BaseManager:
         ----------
         type : str, which processing method to call
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         kwargs : arguments for the processing
 
         """
         self._preprocess(type, procset, use_windows, **kwargs)
 
-    def read_filter(self, ftype, procset=None, use_windows=True):
-        """Read manual filter from database."""
+    def read_filter(self, ftype='FK', procset=None, use_windows=True, uniq_per_rep = False, uniq_per_wid = False):
+        """
+        Read manual filter from database.
+
+        Parameters
+        ----------
+        ftype : string, default 'FK', filter type
+        procset :  str, identifier to set on which dataset the processing should be applied to
+        use_windows : bool, default True, whether to apply the processing to windows
+        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+
+        Returns
+        -------
+        points_top (list), points_bot (list)
+        """
 
         procset = procset or self._procset
 
-        if ftype not in ("FK", "TX"):
-            self.logger.error("Filter type not implemented.")
-            return None, None
+        # if ftype not in ("FK", "TX"):
+        #     self.logger.error("Filter type not implemented.")
+        #     return None, None
 
         sin, rep = self.selected_ids
 
         params_template = {
             "procset": f"'{procset}'",
             "sin": sin,
-            "rep": rep,
             "type": f"'{ftype}'",
         }
 
-        wids = self._sql.get_wids(sin, rep, procset)
-        wids = wids if (wids and use_windows) else [-1]
+        if uniq_per_rep:
+            params_template['rep'] = rep
 
         points_top = []
         points_bot = []
 
+        wids = self._sql.get_wids(sin, rep, procset)
+        wids = wids if (wids and use_windows) else [-1]
+
         for wid in wids:
-            params = {**params_template, "wid": wid}
+            if uniq_per_wid:
+                params = {**params_template, "wid": wid}
+            else:
+                params = params_template
             df = self._sql.read_filter(params)
             pt, pb = filter_df2dict(df)
             points_top.append(pt)
@@ -447,14 +474,26 @@ class BaseManager:
 
         return points_top, points_bot
 
-    def apply_filter(self,ftype, points_top = None, points_bot = None,procset=None, use_windows=True, **kwargs):
-        """Apply manual filter from database."""
+    def apply_filter(self,ftype='FK', points_top = None, points_bot = None,procset=None, use_windows=True, **kwargs):
+        """
+        Apply manual filter from database.
+
+        Parameters
+        ----------
+        ftype : string, default 'FK', filter type
+        points_top : list, top filter
+        points_bot : list, bottom filter
+        procset :  str, identifier to set on which dataset the processing should be applied to
+        use_windows : bool, default True, whether to apply the processing to windows
+        kwargs
+
+        """
 
         procset = procset or self._procset
 
-        if ftype not in ("FK", "TX"):
-            self.logger.error("Filter type not implemented.")
-            return None, None
+        # if ftype not in ("FK"):
+        #     self.logger.error("Filter type not implemented.")
+        #     return None, None
 
         sin, rep = self.selected_ids
         stream = self.current_stream
@@ -485,6 +524,56 @@ class BaseManager:
 
             self._write_data(tmp_stream, sin, rep, procset, wid)
 
+    # TODO test
+    def apply_FKfilter(self, procset=None, apply_to='all', use_windows=True,
+                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+        """
+        Apply FK filter to current selection or all data sets
+
+        Parameters
+        ----------
+        procset : str, identifier to set on which dataset the processing should be applied to
+        apply_to : str, default 'all', whether to apply function to all streams or just the current selection
+        use_windows : bool, default True, whether to apply the processing to windows
+        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        """
+
+        if procset is None:
+            procset = self._procset
+
+        # Apply process to current selection only
+        if apply_to == 'cur':
+            if self.current_stream is None:
+                self.select_data(inplace=True, verbose=False)
+
+            starttime = time.time()
+            print(f'Applying FK filter to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
+
+            points_top, points_bot = self.read_filter(ftype ='FK', procset = procset, use_windows = use_windows,
+                                                      uniq_per_rep = uniq_per_rep, uniq_per_wid = uniq_per_wid)
+            self.apply_filter('FK', points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
+
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
+
+        # Apply process to all data sets
+        elif apply_to == 'all':
+            starttime = time.time()
+
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+                    self.select_data(sin, rep, inplace=True, verbose=False)
+
+                    sys.stdout.write(f'\rApplying FK filter to (SIN,REP) = ({sin}, {rep}) ..... ')
+                    sys.stdout.flush()
+
+                    points_top, points_bot = self.read_filter('FK', procset, use_windows)
+                    self.apply_filter('FK', points_top, points_bot, procset, use_windows, **kwargs)
+
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
+
     def _transform(self, method='phaseshift', procset=None, use_windows=True, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
 
@@ -513,7 +602,7 @@ class BaseManager:
         ----------
         method : str, default 'phaseshift', which transformation method to apply to the data
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         kwargs : arguments for the processing
 
         """
@@ -576,7 +665,7 @@ class BaseManager:
         Parameters
         ----------
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         method : str, default 'max', extraction method
         kwargs : arguments for the extraction
 
@@ -651,7 +740,7 @@ class BaseManager:
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         kwargs : arguments for the processing
 
         """
@@ -694,6 +783,8 @@ class BaseManager:
 
         if curve_data.empty:
             return None
+        else:
+            print(curve_data)
 
         dc = DispersionCurve()
         dc.init_data(curve_data['frequency'], curve_data['velocity'], curve_data['error'])
@@ -752,7 +843,7 @@ class BaseManager:
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -796,7 +887,7 @@ class BaseManager:
         ----------
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, method used to obtain dispersion curve
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -913,7 +1004,7 @@ class BaseManager:
         ----------
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -968,7 +1059,7 @@ class BaseManager:
         ----------
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -1028,7 +1119,7 @@ class BaseManager:
         ----------
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -1110,7 +1201,7 @@ class MASW2DManager(BaseManager):
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if procset is None:
@@ -1139,7 +1230,7 @@ class MASW2DManager(BaseManager):
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if procset is None:
@@ -1161,7 +1252,7 @@ class MASW2DManager(BaseManager):
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         # # check if process exists
@@ -1215,7 +1306,7 @@ class MASW2DManager(BaseManager):
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
@@ -1229,7 +1320,7 @@ class MASW2DManager(BaseManager):
         method : str, transformation method
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if procset is None:
@@ -1279,7 +1370,7 @@ class MASW2DManager(BaseManager):
         type : str, transformation method
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         self.transform_streams(method, procset, apply_to, use_windows, **kwargs)
@@ -1294,7 +1385,7 @@ class MASW2DManager(BaseManager):
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, default 'max', method for dispersion curve extraction
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         # Apply process to current selection only
@@ -1336,7 +1427,7 @@ class MASW2DManager(BaseManager):
         procset : str, identifier to set on which dataset the processing should be applied to
         method : str, default 'max', method for dispersion curve extraction
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         self.extract_curves(procset, method, apply_to, use_windows, **kwargs)
@@ -1353,7 +1444,7 @@ class MASW2DManager(BaseManager):
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         kwargs : arguments for the processing
 
         """
@@ -1400,7 +1491,7 @@ class MASW2DManager(BaseManager):
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -1431,7 +1522,7 @@ class MASW2DManager(BaseManager):
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -1492,7 +1583,7 @@ class MASW2DManager(BaseManager):
         method : str, method used to obtain dispersion curve
         dc_mode : int, default 0, mode of propagation
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
 
         """
 
@@ -1564,7 +1655,7 @@ class MASW2DManager(BaseManager):
         method : str, method used to obtain dispersion curves
         filter:, bool, manually filter curves if True
         dc_mode : int, default 0, mode of propagation
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if procset is None:
@@ -1805,7 +1896,7 @@ class Tomo2DManager(BaseManager):
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if procset is None:
@@ -1834,7 +1925,7 @@ class Tomo2DManager(BaseManager):
         type : str, plot type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         if type == 'pseudosection':
@@ -1904,7 +1995,7 @@ class Tomo2DManager(BaseManager):
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         # # check if process exists
@@ -1957,7 +2048,7 @@ class Tomo2DManager(BaseManager):
         type : str, processing type
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
-        use_windows : bool, default False, whether to apply the processing to windows
+        use_windows : bool, default True, whether to apply the processing to windows
         """
 
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
