@@ -1318,7 +1318,7 @@ class SeismicStream:
     #     """
 
     def _add_fk_data_to_dict(self,FK_data, theta, kw , freq, iX, iT):
-        self.FK_data.update({'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT})
+        self.FK_data = {'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT}
 
     # %% wavefield transformation
     def _inverse_fk_transform(self,FK_unwrap,iT,iX):
@@ -1360,9 +1360,11 @@ class SeismicStream:
         # amplitude data & processing
         if self.tapered_amps == 0:
             amps = self._apply_taper(st = st, inplace = False)
-            self.tapered_amps = 1
         else:
             amps = self._amps(st=st)
+
+        if self.pad:
+            amps,_,_ = self._zero_padding(amps)
 
         # source-receiver offsets
         receiver = self.receiver
@@ -1400,17 +1402,12 @@ class SeismicStream:
         theta = np.angle(FK_unwrap)
         FK_abs = abs(FK_unwrap)
 
-        self._add_fk_data_to_dict(FK_abs, theta, kw, fpos, iX, iT)
-
         return FK_abs, theta, kw, fpos,iX,iT
 
     def apply_fk_filter(self, points, key = 't', **kwargs):
         """apply fk filter from picking boundaries"""
 
-        if not self.FK_data:
-            FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
-        else:
-            FK_abs, theta, kw, freq, iX, iT = self.FK_data.values()
+        FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
 
         df = freq[1] - freq[0]
 
@@ -1448,8 +1445,6 @@ class SeismicStream:
 
         amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
-
-        self._add_fk_data_to_dict(FK_filt, theta, kw, freq, iX, iT)
 
     def reset_FK(self):
         """Reset FK filter"""
@@ -1679,21 +1674,21 @@ class SeismicStream:
         self.velocity = vels
         self.wavenumber = ks
 
-    def _cos_taper(self, x, frac=0.05):
-        """
-        Apply a cosine taper (like MATLAB's cos_taper) to a 1D array.
-        frac is the taper fraction (default 5% at each end).
-        """
-        n = len(x)
-        m = int(frac * n)
-        w = np.ones(n)
-
-        if m > 0:
-            t = np.linspace(0, np.pi / 2, m)
-            w[:m] = np.sin(t) ** 2
-            w[-m:] = w[:m][::-1]
-
-        return x * w
+    # def _cos_taper(self, x, frac=0.05):
+    #     """
+    #     Apply a cosine taper (like MATLAB's cos_taper) to a 1D array.
+    #     frac is the taper fraction (default 5% at each end).
+    #     """
+    #     n = len(x)
+    #     m = int(frac * n)
+    #     w = np.ones(n)
+    #
+    #     if m > 0:
+    #         t = np.linspace(0, np.pi / 2, m)
+    #         w[:m] = np.sin(t) ** 2
+    #         w[-m:] = w[:m][::-1]
+    #
+    #     return x * w
 
     # def _inverse_radon(self, t, delta, M, p, weights, ref_dist,
     #                        line_model='linear',

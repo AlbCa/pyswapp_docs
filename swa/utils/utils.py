@@ -147,8 +147,8 @@ def filter_df2dict(df):
     if df.empty:
         return {},{}
 
-    top = df[df['key'] == 't']
-    bot = df[df['key'] == 'b']
+    top = df[df['key'] == 't'].sort_values('x_value')
+    bot = df[df['key'] == 'b'].sort_values('x_value')
 
     points_top = dict(zip(top['x_value'], top['y_value']))
     points_bot = dict(zip(bot['x_value'], bot['y_value']))
