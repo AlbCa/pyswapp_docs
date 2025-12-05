@@ -1352,6 +1352,7 @@ class DataSwitcherFilterFK(DataSwitcherBase):
                 for pts, key2 in zip([pt, pb], ["t", "b"]):
                     stream.apply_fk_filter(pts, key2)
 
+            stream.tapered_amps = 1
             self._write_data(stream, sin, rep, self.procset, wid)
 
     def closeEvent(self, event):
