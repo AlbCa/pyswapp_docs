@@ -67,7 +67,7 @@ class CombineCurves:
 
         resampled_list = []
 
-        for (sin, rep), group in data.groupby(['sin', 'rep']):
+        for (sin, rep, wid), group in data.groupby(['sin', 'rep', 'wid']):
             group = group.sort_values('frequency')
 
             # Interpolate velocity and error
@@ -79,6 +79,7 @@ class CombineCurves:
             resampled_list.append(pd.DataFrame({
                                 'sin': sin,
                                 'rep': rep,
+                                'wid': wid,
                                 'frequency': parx_new,
                                 'velocity': pary_new,
                                 'error': err_new}))
@@ -90,8 +91,8 @@ class CombineCurves:
 
         data_resampled = self._resample(data, **kwargs)
 
-        stats = (data_resampled.groupby("frequency").agg(velocity_mean=("velocity", "mean"),
-                                               velocity_std=("velocity", "std")).reset_index())
+        stats = (data_resampled.groupby("frequency").agg(velocity_mean=("velocity", np.nanmean),
+                                               velocity_std=("velocity", np.nanstd)).reset_index())
 
         return stats['frequency'].to_numpy(), stats['velocity_mean'].to_numpy(), stats['velocity_std'].to_numpy()
 
@@ -148,6 +149,7 @@ class CombineCurves:
             ax.set_ylabel('phase velocity (m/s)')
             ax.grid(True, linestyle=':')
 
+            plt.locator_params(nbins=4)
             plt.show()
 
         return dc_mean
