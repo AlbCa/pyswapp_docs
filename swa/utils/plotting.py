@@ -66,7 +66,7 @@ def draw1DColumn(ax, x, val, thk=None, depth = None, width=1, vmin=1, vmax=1000,
         pp.set_cmap(cmap)
 
     pp.set_norm(Normalize(vmin, vmax))
-    pp.set_array(np.array(val))
+    pp.set_array(np.asarray(val, dtype=float))
     pp.set_clim(vmin, vmax)
 
     return col
