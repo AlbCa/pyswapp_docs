@@ -669,8 +669,8 @@ class DCPickingInteractive(DraggablePoints):
         y_pick = self._ydata[peaks_idx[cols]]
 
         if self.domain == 'FK':
-            freq_pick = y_pick
-            vel_pick = phase_velocity(y_pick,x_pick)
+            freq_pick, uniq_id = np.unique(y_pick, return_index=True)
+            vel_pick = phase_velocity(y_pick,x_pick)[uniq_id]
         else:
             freq_pick = x_pick
             vel_pick = y_pick
