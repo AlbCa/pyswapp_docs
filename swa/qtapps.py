@@ -229,7 +229,7 @@ class DataSwitcherBase(QWidget):
         self.kwargs = kwargs
 
         self._interact_kwargs = {
-            'domain': self.method,
+            'domain': 'FV',
             'taper_type': self.kwargs.pop('taper_type', 'tukey'),
             'tapering': self.kwargs.pop('tapering', 'mild'),
             'taper_length': self.kwargs.pop('taper_length', 5),
@@ -1121,16 +1121,19 @@ class DataSwitcherFilter(DataSwitcherBase):
 
     def write_filtered_data(self):
 
-        for labels in self.all_labels:
-            for label in labels:
-                sin, rep, wid = label
+        if self.is_grouped:
+            labels = [label for group in self.all_labels for label in group]
+        else:
+            labels = self.all_labels
 
-                stream = self.select_data(sin, rep)
-                self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
+        for sin, rep, wid in labels:
+            stream = self.select_data(sin, rep)
+            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
 
-                stream = self.apply_filter(stream, sin, rep, wid)
-                stream.tapered_amps = 1
-                self._write_data(stream, sin, rep, self.procset, wid)
+            stream = self.apply_filter(stream, sin, rep, wid)
+            stream.tapered_amps = 1
+
+            self._write_data(stream, sin, rep, self.procset, wid)
 
     def closeEvent(self, event):
 
