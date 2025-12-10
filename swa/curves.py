@@ -15,7 +15,14 @@ class CombineCurves:
         self.data = data
 
     def _binning(self, lam_vec, vel_vec, lam_min = 1, lam_max = 150, a=3, minvelerr=None):
-        """combination of dispersion curves from SW measurements (Olafsdottir, 2018)"""
+        """combination of dispersion curves from SW measurements (Olafsdottir, 2018)
+
+        References
+        ----------
+        Olafsdottir, E. ´A., Bessason, B. & Erlingsson, S., 2018. Combination of
+        dispersion curves from MASW measurements, Soil Dynamics and Earthquake
+        Engineering, 113, 473-487.
+        """
 
         # define wavelength intervals
         lam_vec = lam_vec.flatten()

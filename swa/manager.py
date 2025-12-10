@@ -8,15 +8,6 @@ from .stream import SeismicStream
 from .curves import CombineCurves
 from .qtapps import *
 
-# TODOs
-# TODO: optimization
-# TODO: do not save raw to db or instead of reading files read from db
-# TODO: test on field data
-# TODO: basic sanity checks
-# TODO: error handling!!! : e.g., when requesting data from database always check whether its empty or not!
-# --> change warnings to logging!
-# TODO: documentation!!!
-
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db', overwrite = False, **kwargs):
         """
@@ -29,9 +20,15 @@ class BaseManager:
         path2geom : str, optional, path to the geometry file
         settings : DataFrame, settings for the processing and visualisation
         database : str, name of the database
+        overwrite: bool, optional, overwrite database
         """
 
         self.logger = create_logging(name='Manager')
+
+        # check input files
+        assert_exists(path2raw, os.path.isdir, "Raw data folder")
+        assert_exists(path2geom, os.path.isfile, "Geometry file")
+
         self.app = QApplication(sys.argv)
 
         self.prjdir = prjdir
@@ -49,10 +46,11 @@ class BaseManager:
         # overwrite database if it exists to create new project
         if overwrite:
             try:
-                os.remove(self.database)
-                self.logger.info(f'SQL database {self.database} deleted.')
-            except OSError:
-                pass
+                os.remove(self.path2db)
+            except OSError as e:
+                raise OSError(f"Could not delete database: {e}") from e
+            else:
+                self.logger.info(f"SQL database {self.path2db} deleted.")
 
         # create/load project
         if os.path.isfile(self.path2db):
@@ -72,7 +70,10 @@ class BaseManager:
             if (self.path2raw is not None):
 
                 rename = kwargs.pop('rename', False)
-                print('Copying and renaming raw data into project directory ..... ' , end="")
+                if rename:
+                    print('Copying and renaming raw data into project directory ..... ' , end="")
+                else:
+                    print('Copying raw data into project directory ..... ', end="")
                 starttime = time.time()
                 _, self.ext = get_fileList(self.path2raw)
                 rename_files(self.path2raw, extension=self.ext, prjdir=self.prjdir,rename = rename)
@@ -109,10 +110,9 @@ class BaseManager:
                     endtime = time.time()
                     print(f'{np.round(endtime - starttime, 2)} s')
 
-                    #self.logger.info('No geometry file found or created.')
+                    self.logger.error('No geometry file found or created.')
 
-                    print('No geometry.csv file found or created. '
-                          'Creating figures for data preview mode ..... ', end="")
+                    print('Creating figures for data preview mode ..... ', end="")
                     starttime = time.time()
                     figures = self.get_figures()
                     endtime = time.time()
@@ -120,9 +120,6 @@ class BaseManager:
 
                     # data preview
                     self.data_preview(figures)
-
-                    # raise FileNotFoundError(
-                    #     'Geometry file not found and data does not contain source/receiver information.')
 
         self.path2geom = os.path.join(self.prjdir, '02_geom/geometry.csv')
 
@@ -132,7 +129,9 @@ class BaseManager:
         self._sql.read_geometry(self.path2geom)
 
         # processing settings
-        if self.settings is None:
+        if (self.settings is None) or (not isinstance(self.settings, pd.core.frame.DataFrame)):
+            self.logger.info('No settings provided or provided settings not of type dict.'
+                             '\nUsing default settings instead.')
             self.settings = create_settings()
         self._sql.read_setting(self.settings)
 
@@ -144,18 +143,27 @@ class BaseManager:
 
         # set procset
         self.set_new_procset(procset='proc1')
-        #self._sql.show_tables()
 
         print('')
 
     def _load_project(self,**kwargs):
         """Load the project"""
 
-        self.path2raw = os.path.join(self.prjdir, '01_data/raw')
-        self.fileList, self.ext = get_fileList(self.path2raw)
-        self.path2geom = os.path.join(self.prjdir, '02_geom/geometry.csv')
-
         print('Loading project:')
+
+        self.path2raw = os.path.join(self.prjdir, '01_data/raw')
+        self.path2geom = os.path.join(self.prjdir, '02_geom/geometry.csv')
+        path2proc = os.path.join(self.prjdir, '03_proc')
+
+        # check project directory
+        assert_exists(self.path2raw, os.path.isdir, "Raw data folder")
+        assert_exists(self.path2geom, os.path.isfile, "Geometry file")
+        assert_exists(path2proc, os.path.isdir, "Proc data folder")
+
+        self.fileList, self.ext = get_fileList(self.path2raw)
+        if not self.fileList:
+            raise FileNotFoundError(f'No raw data files found in "{self.path2raw}".')
+
         self._sql = SQL(database=self.path2db)
 
         # load settings
@@ -236,7 +244,6 @@ class BaseManager:
             print('Loading amplitude data from "%s" ..... ' % self._loadset, end="")
             starttime = time.time()
 
-            # data = self.data
             shots = self._sql.get_table('shots')
 
             for i in range(len(shots)):
@@ -308,7 +315,6 @@ class BaseManager:
 
     def print_stats(self, which = 'stream'):
         """print stream information"""
-
         stream = self.current_stream
         stream.print_stats(which)
 
@@ -333,14 +339,10 @@ class BaseManager:
 
     def _set_data(self, data, sin, rep, procset, wid=-1):
         """set processed data from database to current stream"""
-
         par, amps, recs, sht = self._get_data(sin, rep, procset=procset, wid=wid)
-
         if amps is not None:
             amps_ari = amps.transpose()
             data.update_pst(amps_ari, sht, recs, par)
-        # else:
-        #     self.logger.error(f'No data for ({sin},{rep})')
 
     def _set_FV(self, data, sin, rep, procset, wid=-1, method='phaseshift'):
         """set FV data from database to current stream"""
@@ -441,10 +443,6 @@ class BaseManager:
 
         procset = procset or self._procset
 
-        # if ftype not in ("FK", "TX"):
-        #     self.logger.error("Filter type not implemented.")
-        #     return None, None
-
         sin, rep = self.selected_ids
 
         params_template = {
@@ -491,10 +489,6 @@ class BaseManager:
 
         procset = procset or self._procset
 
-        # if ftype not in ("FK"):
-        #     self.logger.error("Filter type not implemented.")
-        #     return None, None
-
         sin, rep = self.selected_ids
         stream = self.current_stream
 
@@ -517,24 +511,24 @@ class BaseManager:
                     )
                     continue
 
-                for pts, key in zip([pt, pb], ["t", "b"]):
-                    tmp_stream.apply_fk_filter(pts, key, **kwargs)
+                tmp_stream.apply_fk_filter([pt, pb], ["t", "b"], **kwargs)
             else:
                 raise NotImplementedError
 
+            tmp_stream.tapered_amps = 1
             self._write_data(tmp_stream, sin, rep, procset, wid)
 
-    # TODO test
-    def apply_FKfilter(self, procset=None, apply_to='all', use_windows=True,
+    def apply_filter_2D(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
                        uniq_per_rep = False, uniq_per_wid = False, **kwargs):
         """
-        Apply FK filter to current selection or all data sets
+        Apply filter to current selection or all data sets
 
         Parameters
         ----------
         procset : str, identifier to set on which dataset the processing should be applied to
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default True, whether to apply the processing to windows
+        ftype : string, default 'FK', filter type
         uniq_per_rep : bool, default False, whether a unique filter exists for each rep
         uniq_per_wid : bool, default False, whether a unique filter exists for each wid
         """
@@ -548,11 +542,11 @@ class BaseManager:
                 self.select_data(inplace=True, verbose=False)
 
             starttime = time.time()
-            print(f'Applying FK filter to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
+            print(f'Applying {ftype} filter to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]}) ..... ', end='')
 
-            points_top, points_bot = self.read_filter(ftype ='FK', procset = procset, use_windows = use_windows,
+            points_top, points_bot = self.read_filter(ftype =ftype, procset = procset, use_windows = use_windows,
                                                       uniq_per_rep = uniq_per_rep, uniq_per_wid = uniq_per_wid)
-            self.apply_filter('FK', points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
+            self.apply_filter(ftype, points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -573,6 +567,8 @@ class BaseManager:
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
+
+        self.set_loadset(procset)
 
     def _transform(self, method='phaseshift', procset=None, use_windows=True, **kwargs):
         """apply wavefield transformation to current selection or all data sets"""
@@ -657,7 +653,16 @@ class BaseManager:
         for wid in wids:
             tmp = copy.deepcopy(stream)
             self._set_data(tmp, sin, rep, procset, wid)
-            self._set_FV(tmp, sin, rep, self._procset, wid, method=method)
+
+            if wid == -1:
+                trafo_labels = self._sql.get_trafo_labels(procset, use_windows=False)
+            else:
+                trafo_labels = self._sql.get_trafo_labels(procset, use_windows=True)
+
+            # if transformation exists set dispersive energy
+            if len(trafo_labels) > 0:
+                self._set_FV(tmp, sin, rep, procset, wid, method=trafo_labels[-1])
+
             self._extract_dc(tmp, sin = sin, rep = rep, wid = wid, procset=procset,
                           method = method, **kwargs)
 
@@ -954,6 +959,7 @@ class BaseManager:
         _, recs_all = self._sql.get_geometry(sin='*')
         params = {'procset': f"'{procset}'", 'method': f"'{method}'", 'dc_mode': f"{dc_mode}"}
         curves = self._sql.read_curve(params)
+        dx = np.median(abs(np.diff(recs_all.rx)))
 
         if curves.empty:
             self.logger.warning('No dispersion curves in database. Pseudosection not visualized.')
@@ -963,12 +969,11 @@ class BaseManager:
         fmax = kwargs.pop('fmax', curves['frequency'].max())
 
         if axes is None:
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize = (6,4))
         else:
             ax = axes
             fig = ax.figure
 
-        # Use groupby to avoid repeated filtering
         for xmid, sub in curves.groupby('xmid'):
             dc = DispersionCurve()
             dc.init_data(sub['frequency'], sub['velocity'], sub['error'])
@@ -979,6 +984,7 @@ class BaseManager:
                 vmax=vmax,
                 cmap=cmap,
                 y_value='frequency',
+                width = dx,
                 **kwargs
             )
 
@@ -1052,7 +1058,7 @@ class BaseManager:
 
         return labels
 
-    def gui_interact(self, type='', procset = None, use_windows=True,**kwargs):
+    def gui_interact(self, type='pick', domain = 'FV', procset = None, use_windows=True,**kwargs):
         """
         interactive figure switcher
 
@@ -1069,13 +1075,17 @@ class BaseManager:
 
         window_title = 'SWA - Interactive Figure Viewer'
 
-        # if type in ['', 'seismogram', 'TX']:
-        #     raise NotImplementedError()
-        #     #DataSwitcher = DataSwitcherFilterSeis
-        if type in ['dispersionImage', 'FV']:
+        if type == 'pick':#in ['dispersionImage', 'FV']:
+            domain = 'FV'
             DataSwitcher = DataSwitcherPick
-        elif type == 'FK':
-            DataSwitcher = DataSwitcherFilterFK
+        elif type == 'filter':
+            if domain == 'FK':
+                DataSwitcher = DataSwitcherFilterFK
+            elif domain == 'TX':
+                DataSwitcher = DataSwitcherFilterTX
+            else:
+                self.logger.error(f'Filtering is not possible in domain "{domain}"')
+                return
         else:
             self.logger.error(f'Interactive figure switcher does not exist for plot type "{type}"')
             return
@@ -1087,14 +1097,14 @@ class BaseManager:
         wids = self._sql.get_wids(sin, rep, self._loadset)
 
         if wids and use_windows:
-            window = DualDataSwitcher(self.data, self.path2db, plot=type,
+            window = DualDataSwitcher(self.data, self.path2db, plot=domain,
                                         DataSwitcher=DataSwitcher,
                                         procset=procset,
                                         procsets=self._sql.get_proc_labels(),
                                         window_title=window_title,select_plot = False, **kwargs)
 
         else:
-            window = DataSwitcher(self.data, self.path2db, plot=type,
+            window = DataSwitcher(self.data, self.path2db, plot=domain,
                                     procset = procset,
                                     procsets = self._sql.get_proc_labels(),
                                     window_title=window_title,select_plot = False,**kwargs)
@@ -1111,6 +1121,8 @@ class BaseManager:
         self.app.exec()
 
         plt.close('all')
+
+        self.set_loadset(procset)
 
     def gui_view(self, type='', procset = None, use_windows=True,**kwargs):
         """
@@ -1772,6 +1784,7 @@ class MASW2DManager(BaseManager):
 
         _, recs_all = self._sql.get_geometry(sin='*')
         curves = self._sql.read_curve(params)
+        dx = np.median(abs(np.diff(recs_all.rx)))
 
         if not curves.empty:
 
@@ -1801,7 +1814,7 @@ class MASW2DManager(BaseManager):
                 outfile = kwargs.pop('outfile', None)
 
                 if axes is None:
-                    fig, ax = plt.subplots()
+                    fig, ax = plt.subplots(figsize = (6,4))
                 else:
                     ax = axes
                     fig = ax.figure
@@ -1814,7 +1827,9 @@ class MASW2DManager(BaseManager):
                     dc.plotColumn(axes=ax,
                                   xmid=xmid,
                                   vmin=vmin, vmax=vmax,
-                                  cmap=cmap, y_value='frequency', **kwargs)
+                                  cmap=cmap,
+                                  y_value='frequency',
+                                  width = dx, **kwargs)
 
                 plot_colorBar(ax, vmin, vmax, cmap=cmap, orientation='vertical')
                 ax.set_xlim([recs_all['rx'].min(), recs_all['rx'].max()])
@@ -2124,6 +2139,8 @@ class Tomo2DManager(BaseManager):
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
 
+        self.set_loadset(procset)
+
     def run(self, min_offset=3, max_offset=1e6, lam = 1, abs_err = None, rel_err = None, procset = None, **kwargs):
         """
         Run the tomographic like approach
@@ -2146,11 +2163,11 @@ class Tomo2DManager(BaseManager):
         print(f'Running tomographic-like approach')
 
         # ensure phasediff table exists
-        if 'phase_differences' not in self._sql.get_tables():
+        try:
+            freq = self._sql.read_f_from_pd(procset, calc='NONE')
+        except ValueError:
             self.compute_phasediff(procset)
-
-        # frequencies
-        freq = self._sql.read_f_from_pd(procset, calc='NONE')
+            freq = self._sql.read_f_from_pd(procset, calc='NONE')
 
         # geometry
         _, recs_all = self._sql.get_geometry(sin='*')

@@ -1115,13 +1115,14 @@ class SeismicStream:
         # update
         self._pst = st_proc
 
-    def _linear_mute(self, points,key='t', **kwargs):
+    def _linear_mute(self, x_data, y_data,key='t', **kwargs):
         """
         linear mute
 
         Parameters
         ----------
-        points : list, point list containing x and y data
+        x_data : list, point list containing x data
+        x_data : list, point list containing y data
         key :  str, which type of mute to apply ('t'-top, 'b'-bottom)
         kwargs :
         """
@@ -1147,7 +1148,6 @@ class SeismicStream:
             st_proc = self._st.copy()
         else:
             st_proc = self._pst.copy()
-        self._st_backup_last_mute = st_proc.copy()
 
         receiver = np.array(self.receiver)
         dt = self.dt  # sampling rate in sec
@@ -1155,9 +1155,12 @@ class SeismicStream:
         ndelay = int(abs(delay / dt))
         npts = len(st_proc[0].data)
 
-        ((idx1, t1), (idx2, t2)) = points
-        x1 = receiver[idx1]
-        x2 = receiver[idx2]
+        (idx1, idx2) = x_data
+        (t1, t2) = y_data
+
+        x1 = receiver[int(idx1)]
+        x2 = receiver[int(idx2)]
+
         idx_between = np.where((receiver >= x1) & (receiver <= x2))[0]
         slope = (t2 - t1) / (x2 - x1)
         times = t1 + slope * (receiver[idx_between] - x1)
@@ -1187,13 +1190,14 @@ class SeismicStream:
     def linear_mute(self, points,key='t', **kwargs):
 
         # extract points from points_list
-        points_list = []
         if len(points) > 0:
             x, y = zip(*sorted(points.items()))
-            for i in range(len(x)):
-                points_list.append((x[i], y[i]))
+            self._linear_mute(x,y, key, **kwargs)
 
-            self._linear_mute(points_list, key, **kwargs)
+    def apply_linear_mute(self, points_list, key_list,**kwargs):
+
+        for points, key in zip(points_list, key_list):
+            self.linear_mute(points,key, **kwargs)
 
     def _reset_mute(self):
         self._pst = self._st.copy()
@@ -1280,7 +1284,7 @@ class SeismicStream:
                               )
             ax.add_artist(at)
 
-            plot = SeismoInteractive(ax, receiver=receiver)
+            plot = TXInteractive(ax, receiver=receiver)
             ax.set_title(f'Velocity estimation', fontweight='bold')
             plt.tight_layout()
             plt.show()
@@ -1318,7 +1322,7 @@ class SeismicStream:
     #     """
 
     def _add_fk_data_to_dict(self,FK_data, theta, kw , freq, iX, iT):
-        self.FK_data = {'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT}
+        self.FK_data.update({'FK_abs': FK_data, 'theta': theta, 'kw': kw, 'freq': freq, 'iX': iX, 'iT': iT})
 
     # %% wavefield transformation
     def _inverse_fk_transform(self,FK_unwrap,iT,iX):
@@ -1363,9 +1367,6 @@ class SeismicStream:
         else:
             amps = self._amps(st=st)
 
-        if self.pad:
-            amps,_,_ = self._zero_padding(amps)
-
         # source-receiver offsets
         receiver = self.receiver
         source = self.source
@@ -1402,9 +1403,11 @@ class SeismicStream:
         theta = np.angle(FK_unwrap)
         FK_abs = abs(FK_unwrap)
 
+        self._add_fk_data_to_dict(FK_abs, theta, kw, fpos, iX, iT)
+
         return FK_abs, theta, kw, fpos,iX,iT
 
-    def apply_fk_filter(self, points, key = 't', **kwargs):
+    def apply_fk_filter(self, points_list, key_list, **kwargs):
         """apply fk filter from picking boundaries"""
 
         FK_abs, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
@@ -1415,27 +1418,28 @@ class SeismicStream:
         mask = np.ones_like(FK_abs, dtype=float)
 
         # Interpolate user-defined fk boundary
-        if points:
-            x, y = zip(*sorted(points.items()))
-            k_boundary = np.array(x)
-            f_boundary = np.array(y)
-            f_interp = interpolate.interp1d(f_boundary, k_boundary, bounds_error=False, fill_value="extrapolate")
-            k_limit = f_interp(np.abs(f_grid))  # apply absolute to support symmetry
+        for points, key in zip(points_list, key_list):
+            if points:
+                x, y = zip(*sorted(points.items()))
+                k_boundary = np.array(x)
+                f_boundary = np.array(y)
+                f_interp = interpolate.interp1d(f_boundary, k_boundary, bounds_error=False, fill_value="extrapolate")
+                k_limit = f_interp(np.abs(f_grid))  # apply absolute to support symmetry
 
-            if key == 'b':
-                mask[np.abs(k_grid) >= k_limit] = 0
-            elif key == 't':
-                mask[np.abs(k_grid) <= k_limit] = 0
+                if key == 'b':
+                    mask[np.abs(k_grid) >= k_limit] = 0
+                elif key == 't':
+                    mask[np.abs(k_grid) <= k_limit] = 0
 
-            taper_len = int(kwargs.pop('taper_length', 5) / (df))
-            taper = signal.windows.hann(2 * taper_len)
-            for j in range(mask.shape[0]):
-                k_cut = k_limit[j]
-                idx = np.where(np.abs(kw) >= k_cut)[0]
-                if len(idx) > 0:
-                    start = max(idx[0] - taper_len, 0)
-                    end = min(idx[0] + taper_len, len(kw))
-                    mask[j, start:end] *= taper[:end - start]
+                taper_len = int(kwargs.pop('taper_length', 5) / (df))
+                taper = signal.windows.hann(2 * taper_len)
+                for j in range(mask.shape[0]):
+                    k_cut = k_limit[j]
+                    idx = np.where(np.abs(kw) >= k_cut)[0]
+                    if len(idx) > 0:
+                        start = max(idx[0] - taper_len, 0)
+                        end = min(idx[0] + taper_len, len(kw))
+                        mask[j, start:end] *= taper[:end - start]
 
         FK_abs_filt = FK_abs * mask
 
@@ -1445,6 +1449,8 @@ class SeismicStream:
 
         amps = self._inverse_fk_transform(FK_filt, iT, iX)
         self._amps2st(amps)
+
+        self._add_fk_data_to_dict(FK_filt, theta, kw, freq, iX, iT)
 
     def reset_FK(self):
         """Reset FK filter"""
@@ -2696,7 +2702,7 @@ class SeismicStream:
 
         return fig
 
-    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True, gui = False, points = None, **kwargs):
+    def _plotFK(self,FK_data=None,axes= None, outfile=None, fmt=None, show=True, gui = False, **kwargs):
         """plot FK image"""
 
         figsize = kwargs.pop('figsize', (8, 8))
@@ -2712,13 +2718,11 @@ class SeismicStream:
             ax = axes
             fig = ax.figure
 
-        if points is not None:
-            pt, pb = filter_df2dict(points)
-            for pts, key2 in zip([pt, pb], ["t", "b"]):
-                self.apply_fk_filter(pts, key2)
-
         if FK_data is None:
-            FK_data, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
+            if self.FK_data:
+                FK_data, theta, kw, freq, iX, iT = self.FK_data.values()
+            else:
+                FK_data, theta, kw, freq, iX, iT = self._fk_transform(**kwargs)
         else:
             iF = nextpow2(self.npts)[1]
             k = np.fft.fftfreq(iF, self.dx)
@@ -2913,6 +2917,14 @@ class SeismicStream:
                               'because wavefield transformation not yet performed.')
             return None
 
+        plotkey = kwargs.pop("plotkey","velocity")
+
+        daty = self.velocity
+        labely = "phase velocity (m/s)"
+
+        datx = self.frequency
+        labelx = "frequency (Hz)"
+
         if self.norm_power:
             # work around
             local_max = self.use_local_max_power
@@ -2924,18 +2936,6 @@ class SeismicStream:
         else:
             label = "amplitudes"
             limits = (np.min(dispersive_energy), np.max(dispersive_energy))
-
-        keyy = kwargs.pop("key","velocity")
-
-        if keyy == "wavenumber":
-            daty = self.wavenumber
-            labely = "wavenumber (rad/m)"
-        else:
-            daty = self.velocity
-            labely = "phase velocity (m/s)"
-
-        datx = self.frequency
-        labelx = "frequency (Hz)"
 
         # plot dispersion image and dispersion curves
         contours = np.linspace(limits[0], limits[1], 21)

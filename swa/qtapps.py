@@ -218,8 +218,9 @@ class DataSwitcherBase(QWidget):
         self.methods = self.grouped_methods.get(procset, [])
         if not self.methods:
             self.method = "phaseshift"
-            self.methods = [self.method]
+            self.methods = [self.method, 'FK']
         else:
+            self.methods.append('FK')
             self.method = self.methods[0]
 
         self.labels = self._get_current_labels()
@@ -228,6 +229,7 @@ class DataSwitcherBase(QWidget):
         self.kwargs = kwargs
 
         self._interact_kwargs = {
+            'domain': self.method,
             'taper_type': self.kwargs.pop('taper_type', 'tukey'),
             'tapering': self.kwargs.pop('tapering', 'mild'),
             'taper_length': self.kwargs.pop('taper_length', 5),
@@ -857,13 +859,13 @@ class DataSwitcherPick(DataSwitcherBase):
     def show_popup(self):
         """Help popup with keyboard shortcuts."""
         text = "\n".join((
-            r'Left mouse click in dispersion image: add a point with a confidence interval.'
-            r'Left mouse click and hold: Drag added point.'
-            r'Right mouse click on point: delete point.'
-            r'Press numbers 0–9 to set dispersion curve mode index.',
-            r'Press d: Delete boundary.',
-            r'Press r: Reset picks.',
-            r'Mouse Scroll: Adjust boundary tightness.'
+            'Left mouse click in dispersion image: add a point with a confidence interval.',
+            'Left mouse click and hold: Drag added point.',
+            'Right mouse click on point: delete point.',
+            'Press numbers 0–9 to set dispersion curve mode index.',
+            'Press d: Delete boundary.',
+            'Press r: Reset picks.',
+            'Mouse Scroll: Adjust boundary tightness.'
         ))
 
         msg = QMessageBox()
@@ -952,64 +954,27 @@ class DataSwitcherPick(DataSwitcherBase):
         """Change FV/dc processing method and refresh display."""
         try:
             self.method = method
+
+            if self.method == 'FK':
+                self._interact_kwargs['domain'] = 'FK'
+                self.plot = 'FK'
+            else:
+                self._interact_kwargs['domain'] = 'FV'
+                self.plot = 'FV'
+
             self.update_display()
         except Exception as e:
             self.logger.exception(f"Error setting method {method}: {e}")
 
 
-# class DataSwitcherFilterSeis(DataSwitcherBase):
-#     """Manual linear mute interface"""
-#
-#     def __init__(self, data, sql, plot = '', use_windows=False,
-#                  procset=None, procsets=None,select_plot = True, **kwargs):
-#
-#         if plot == 'FK':
-#             interaction_class = FKFilterInteractive
-#         # elif plot == '':
-#         #     interaction_class = SeismoInteractive
-#         else:
-#             raise NotImplementedError
-#
-#         super().__init__(data, sql, plot = plot , use_windows=use_windows, interaction_class=interaction_class,
-#                  procset = procset, procsets = procsets, btn_label='Filter | Reset', select_plot = select_plot, **kwargs)
-#
-#     def interact(self):
-#         """filter data based on FK plot"""
-#         if self.interactor:
-#             self.canvas.setFocus()
-#
-#             points = self.points[self.current_index]
-#             label = self.labels[self.current_index]
-#
-#             self._sql.duplicate_data(self.stream, label[0], label[1], label[2])
-#
-#             # filter data
-#             if points:
-#                 stream = self.interactor.filter()
-#                 self.points[self.current_index] = {}
-#             # reset
-#             else:
-#                 stream = copy.deepcopy(self.stream) #self.select_data(label[0], label[1])
-#                 self._set_data(stream, label[0], label[1], 'tmp', label[2])
-#
-#             self._write_data(stream, label[0], label[1], self.procset, label[2])
-#
-#             self.update_display()
-#             self.canvas.setFocus()
-#
-#     # remove duplicates
-#     def clean(self):
-#         for table in self._sql.get_tables():
-#             self._sql.delete_data(table, {'procset': "'%s'" % 'tmp'})
-
-
-class DataSwitcherFilterFK(DataSwitcherBase):
-    """Manual FK filter interface."""
+class DataSwitcherFilter(DataSwitcherBase):
+    """Manual filter interface."""
 
     def __init__(self, data, sql, plot='FK', use_windows=False,
-                 procset=None, procsets=None, select_plot=True, **kwargs):
+                 procset=None, procsets=None, select_plot=True,
+                 interaction_class=None,**kwargs):
 
-        self.stream_cache = {}
+        self.ftype = plot
 
         self.canvas1 = FigureCanvas()
         self.seis_kwargs = {'show_xticks': False, 'title': None, 'figsize': (7.2, 8)}
@@ -1023,13 +988,353 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         # unique filter exists for each wid
         self._uniq_per_wid = kwargs.pop('uniq_per_wid', True)
 
-        interaction_class = FKFilterInteractive
+        interaction_class = interaction_class
 
         super().__init__(
             data, sql, plot=plot, use_windows=use_windows,
             interaction_class=interaction_class,
             procset=procset, procsets=procsets,
             btn_label='Filter | Reset',
+            select_plot=select_plot,
+            **kwargs
+        )
+
+    def current_data(self):
+
+        try:
+            label = self.labels[self.current_index]
+        except Exception:
+            self.logger.error("Invalid current_index in create_figure.")
+            return None
+
+        sin, rep, wid = label
+        try:
+            stream = self.select_data(sin, rep)
+            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
+            self.stream = self.apply_filter(stream, sin, rep, wid)
+
+        except Exception as err:
+            self.logger.error(f"Error setting data: {err}")
+            return None
+
+    def create_figure(self, plot=None,  **kwargs):
+        """Safely create the requested figure."""
+
+        if not self.labels:
+            return None
+
+        plot = plot or self.plot
+
+        # Default stream plot
+        if self.data_exists:
+            try:
+                return self.stream.plot(plot, show=False, gui=True, **self.kwargs, **kwargs)
+            except Exception as err:
+                self.logger.error(f"Error during stream plot: {err}")
+                return None
+
+        return None
+
+    def setup_interaction(self, figure):
+
+        self.interactor = None
+        if (self.interaction_class is not None) and self.data_exists:
+            ax = figure.axes[0]
+            points = self.points.get(self.current_index, {})
+            picks = self.picks.get(self.current_index, {})
+
+            self.interactor = self.interaction_class(ax, points=points, data=self.stream,
+                                                     picks=picks, **self._interact_kwargs)
+
+            self.points[self.current_index] = self.interactor.points
+            self.picks[self.current_index] = self.interactor.picks
+
+    def interact(self):
+        """Apply filter based on interaction points."""
+        try:
+            if not self.interactor:
+                return
+
+            self.canvas.setFocus()
+            points = self.points.get(self.current_index, {})
+            label = self.labels[self.current_index]
+
+            if points:
+                # Save filter points
+                self._sql.write_filter(points, label[0], label[1], self.interactor.key,
+                                       procset=self.procset, wid=label[2], type=self.ftype)
+                self.interactor.update_plot()
+                self.points[self.current_index] = {}
+
+            else:
+                # delete filter
+                params = {'sin': label[0], 'rep': label[1], 'procset': "'%s'" % self.procset, 'wid':label[2]}
+                self._sql.delete_data('filter', params)
+
+            self.update_display()
+            self.canvas.setFocus()
+
+        except Exception as e:
+            self.logger.exception(f"Interaction failed: {e}")
+
+    def show_popup(self):
+        """Show keyboard shortcuts for TX filter."""
+        text = "\n".join((
+            f'Left mouse click in {self.ftype} plot: add a point.',
+            'Left mouse click and hold: drag added point.',
+            'Right mouse click on point: delete point.',
+            'Press t for top or b for bottom filter.'
+        ))
+        msg = QMessageBox()
+        msg.setWindowTitle('Information')
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+
+    def apply_filter(self, stream, sin, rep, wid):
+
+        # Load FK filter
+        params = {'sin': sin,
+                  'procset': "'%s'" % self.procset,
+                  'type': "'%s'" % self.ftype}
+
+        if self._uniq_per_rep:
+            params['rep'] = rep
+
+        if self._uniq_per_wid:
+            params['wid'] = wid
+
+        points = self._sql.read_filter(params)
+
+        if not points.empty:
+            pt, pb = filter_df2dict(points)
+
+            if self.ftype == 'TX':
+                stream.apply_linear_mute([pt, pb], ["t", "b"],
+                                         tapering=self._interact_kwargs['tapering'],
+                                         taper_type=self._interact_kwargs['taper_type'])
+
+            if self.ftype == 'FK':
+                stream.apply_fk_filter([pt, pb], ["t", "b"])
+
+        return stream
+
+    def write_filtered_data(self):
+
+        for labels in self.all_labels:
+            for label in labels:
+                sin, rep, wid = label
+
+                stream = self.select_data(sin, rep)
+                self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
+
+                stream = self.apply_filter(stream, sin, rep, wid)
+                stream.tapered_amps = 1
+                self._write_data(stream, sin, rep, self.procset, wid)
+
+    def closeEvent(self, event):
+
+        if self._apply_filter:
+            self.write_filtered_data()
+        event.accept()
+
+
+class DataSwitcherFilterTX(DataSwitcherFilter):
+    """Manual FK filter interface."""
+
+    def __init__(self, data, sql, plot='TX', use_windows=False,
+                 procset=None, procsets=None, select_plot=True, **kwargs):
+
+        interaction_class = TXInteractive
+
+        super().__init__(
+            data, sql, plot=plot, use_windows=use_windows,
+            interaction_class=interaction_class,
+            procset=procset, procsets=procsets,
+            select_plot=select_plot,
+            **kwargs
+        )
+
+    def init_ui(self):
+        """Build the FK filter interface."""
+
+        try:
+            self.layout = QVBoxLayout(self)
+
+            self.toolbar1 = NavigationToolbar(self.canvas, self)
+
+            self.toolbar_layout = QHBoxLayout()
+
+            self.info_layout = QHBoxLayout()
+
+            label = QLabel(self.window_label)
+            label.setStyleSheet("font-size: 14px; color: gray;")
+            self.info_layout.addWidget(label)
+
+            # SIN/REP/WIN index
+            self.label = QLabel()
+            self.label.setStyleSheet("font-size: 14px; color: gray;")
+
+            self.info_layout.addStretch()
+            self.info_layout.addWidget(self.label)
+            self.layout.addLayout(self.info_layout)
+
+            # Navigation bar
+            self.nav_layout = QHBoxLayout()
+            self.left_btn = QPushButton()
+            self.left_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowLeft))
+            self.left_btn.setFixedSize(40, 40)
+            self.right_btn = QPushButton()
+            self.right_btn.setIcon(self.style().standardIcon(self.style().SP_ArrowRight))
+            self.right_btn.setFixedSize(40, 40)
+
+            self.nav_layout.addWidget(self.left_btn)
+            self.nav_layout.addWidget(self.right_btn)
+
+            if not self.is_grouped:
+                self.combo = self.add_combobox(self.procsets, self.procset)
+                self.combo.currentTextChanged.connect(self.set_procset)
+                self.nav_layout.addWidget(self.combo)
+
+            if not self.is_grouped:
+                _, indices = np.unique(np.asarray(self.labels)[:, 0], return_index=True)
+                indices = np.char.mod('%d', indices + 1)
+
+                self.combo_select_sin = self.add_combobox(indices,
+                                                          str(self.current_index + 1),
+                                                          'SIN:',
+                                                          50)
+                self.combo_select_sin.currentTextChanged.connect(self.set_index)
+                self.nav_layout.addWidget(self.combo_select_sin)
+
+            if self.interaction_class:
+                self.interact_btn = QPushButton(self.btn_label)
+                self.interact_btn.setFixedSize(100, 40)
+                self.nav_layout.addWidget(self.interact_btn)
+
+            self.popup_btn = QPushButton()
+            icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
+            self.popup_btn.setIcon(icon)
+            self.popup_btn.clicked.connect(self.show_popup)
+            self.popup_btn.setFixedSize(40, 40)
+
+            self.nav_layout.addStretch()
+
+            self.nav_layout.addWidget(self.popup_btn)
+
+            self.layout.addLayout(self.nav_layout)
+
+            self.toolbar_layout.addWidget(self.toolbar1)
+            self.layout.addLayout(self.toolbar_layout)
+
+            self.left_btn.clicked.connect(self.show_previous_figure)
+            self.right_btn.clicked.connect(self.show_next_figure)
+
+            if self.interaction_class:
+                self.interact_btn.clicked.connect(self.interact)
+
+            # Canvas
+            self.fig_layout = QHBoxLayout()
+
+            if self.labels:
+                self.current_data()
+                figure0 = self.create_figure(plot='geomShort')
+                self.canvas0 = FigureCanvas(figure0)
+
+                figure1 = self.create_figure(plot='seismogram', **self.seis_kwargs)
+                self.canvas = FigureCanvas(figure1)
+                self.canvas.setFocusPolicy(Qt.StrongFocus)
+                self.canvas.setFocus()
+
+            self.fig_layout.addWidget(self.canvas)
+
+            self.layout.addWidget(self.canvas0)
+            self.layout.addLayout(self.fig_layout)
+
+        except Exception as e:
+            self.logger.exception(f"UI initialization failed: {e}")
+
+    def update_display(self):
+        """Update all canvases, toolbars, labels, and interactor."""
+
+        try:
+            # Store points from previous session
+            if self.interactor and getattr(self.interactor, 'points', None):
+                self.points[self.current_index] = self.interactor.points
+
+            # enable/disable navigation buttons
+            num_figures = len(self.labels)
+            is_navigation_enabled = num_figures > 1
+            self.left_btn.setEnabled(is_navigation_enabled)
+            self.right_btn.setEnabled(is_navigation_enabled)
+
+            self.current_data()
+            figure0 = self.create_figure(plot='geomShort')
+            figure1 = self.create_figure(plot='seismogram', **self.seis_kwargs)
+
+            # update label
+            if not self.is_grouped:
+                label = self.labels[self.current_index]
+                if not figure0:
+                    self.label.setText(f"SIN {label[0]} | REP {label[1]} | No data")
+                else:
+                    self.label.setText(f"SIN {label[0]} | REP {label[1]}")  # + " | " + self.active_label)
+            else:
+                if not figure0:
+                    self.label.setText(f"No data")
+                else:
+                    label = self.labels[self.current_index]
+                    self.label.setText(
+                        f"SIN {label[0]} | REP {label[1]} | WIN {label[2] + 1}")  # + " | " + self.active_label)
+
+            # figure0.tight_layout()
+            if not figure0:
+                self.canvas0 = self.create_placeholder(self.canvas0)
+                self.canvas = self.create_placeholder(self.canvas)
+                return
+
+            # Replace canvas
+            self.canvas0 = self.replace_widget(self.canvas0, figure0)
+            self.canvas = self.replace_widget(self.canvas, figure1)
+
+            # Reset toolbar
+            for tb, c in [(self.toolbar1, self.canvas)]:
+                self.layout.removeWidget(tb)
+                tb.setParent(None)
+
+            self.toolbar1 = NavigationToolbar(self.canvas, self.canvas)
+            self.toolbar_layout = QHBoxLayout()
+            self.toolbar_layout.addWidget(self.toolbar1)
+            self.layout.addLayout(self.toolbar_layout)
+
+            self.canvas.setFocusPolicy(Qt.StrongFocus)
+            self.canvas.setFocus()
+            self.canvas.setEnabled(self.data_exists)
+
+            self.fig_layout = QHBoxLayout()
+            self.fig_layout.addWidget(self.canvas)
+            self.layout.addWidget(self.canvas0)
+            self.layout.addLayout(self.fig_layout)
+
+            # Setup interaction
+            self.setup_interaction(figure=figure1)
+
+        except Exception as e:
+            self.logger.exception(f"Error updating display: {e}")
+
+
+class DataSwitcherFilterFK(DataSwitcherFilter):
+    """Manual FK filter interface."""
+
+    def __init__(self, data, sql, plot='FK', use_windows=False,
+                 procset=None, procsets=None, select_plot=True, **kwargs):
+
+        interaction_class = FKFilterInteractive
+
+        super().__init__(
+            data, sql, plot=plot, use_windows=use_windows,
+            interaction_class=interaction_class,
+            procset=procset, procsets=procsets,
             select_plot=select_plot,
             **kwargs
         )
@@ -1139,62 +1444,6 @@ class DataSwitcherFilterFK(DataSwitcherBase):
         except Exception as e:
             self.logger.exception(f"UI initialization failed: {e}")
 
-    def current_data(self):
-
-        try:
-            label = self.labels[self.current_index]
-        except Exception:
-            self.logger.error("Invalid current_index in create_figure.")
-            return None
-
-        sin, rep, wid = label
-        try:
-            stream = self.select_data(sin, rep)
-            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
-
-            # Load FK filter
-            params = {'sin': sin,
-                      'procset': "'%s'" % self.procset,
-                      'type': "'%s'" % 'FK'}
-
-            if self._uniq_per_rep:
-                params['rep'] = rep
-
-            if self._uniq_per_wid:
-                params['wid'] = wid
-
-            points = self._sql.read_filter(params)
-
-            if not points.empty:
-                pt, pb = filter_df2dict(points)
-
-                for pts, key2 in zip([pt, pb], ["t", "b"]):
-                    stream.apply_fk_filter(pts, key2)
-
-            self.stream = stream
-
-        except Exception as err:
-            self.logger.error(f"Error setting data: {err}")
-            return None
-
-    def create_figure(self, plot=None,  **kwargs):
-        """Safely create the requested figure."""
-
-        if not self.labels:
-            return None
-
-        plot = plot or self.plot
-
-        # Default stream plot
-        if self.data_exists:
-            try:
-                return self.stream.plot(plot, show=False, gui=True, **self.kwargs, **kwargs)
-            except Exception as err:
-                self.logger.error(f"Error during stream plot: {err}")
-                return None
-
-        return None
-
     def update_display(self):
         """Update all canvases, toolbars, labels, and interactor."""
 
@@ -1264,108 +1513,10 @@ class DataSwitcherFilterFK(DataSwitcherBase):
             self.layout.addLayout(self.fig_layout)
 
             # Setup interaction
-            self.interactor = None
-            if (self.interaction_class is not None) and self.data_exists:
-                ax = figure.axes[0]
-                points = self.points.get(self.current_index, {})
-                picks = self.picks.get(self.current_index, {})
-
-                self.interactor = self.interaction_class( ax, points=points, data=self.stream,
-                                                          picks=picks, **self._interact_kwargs )
-
-                # if self.interactor.picks:
-                self.points[self.current_index] = self.interactor.points
-                self.picks[self.current_index] = self.interactor.picks
+            self.setup_interaction(figure=figure)
 
         except Exception as e:
             self.logger.exception(f"Error updating display: {e}")
-
-
-    def interact(self):
-        """Apply FK filter based on interaction points."""
-        try:
-            if not self.interactor:
-                return
-
-            self.canvas.setFocus()
-            points = self.points.get(self.current_index, {})
-            label = self.labels[self.current_index]
-
-            if points:
-                # Save filter points
-                self._sql.write_filter(points, label[0], label[1], self.interactor.key,
-                                       procset=self.procset, wid=label[2], type='FK')
-                self.interactor.update_plot()
-                self.points[self.current_index] = {}
-
-            else:
-                # Reset to original
-                #self._set_data(self.stream, label[0], label[1], self.procset, label[2])
-
-                # delete filter
-                params = {'sin': label[0], 'rep': label[1], 'procset': "'%s'" % self.procset, 'wid':label[2]}
-                self._sql.delete_data('filter', params)
-
-            self.update_display()
-            self.canvas.setFocus()
-
-        except Exception as e:
-            self.logger.exception(f"FK interaction failed: {e}")
-
-    def show_popup(self):
-        """Show keyboard shortcuts for FK filter."""
-        text = "\n".join((
-            r'Left mouse click in FK plot: add a point.'
-            r'Left mouse click and hold: drag added point.'
-            r'Right mouse click on point: delete point.'
-            r'Press t for top or b for bottom filter.'
-        ))
-        msg = QMessageBox()
-        msg.setWindowTitle('Information')
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec_()
-
-    def apply_filter(self):
-
-        for label in self.labels:
-            sin, rep, wid = label
-
-            stream = self.select_data(sin, rep)
-            self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
-
-            # Load FK filter
-            params = {'sin': sin,
-                      'procset': "'%s'" % self.procset,
-                      'type': "'%s'" % 'FK'}
-
-            if self._uniq_per_rep:
-                params['rep'] = rep
-
-            if self._uniq_per_wid:
-                params['wid'] = wid
-
-            points = self._sql.read_filter(params)
-
-            if not points.empty:
-                pt, pb = filter_df2dict(points)
-                for pts, key2 in zip([pt, pb], ["t", "b"]):
-                    stream.apply_fk_filter(pts, key2)
-
-            stream.tapered_amps = 1
-            self._write_data(stream, sin, rep, self.procset, wid)
-
-    def closeEvent(self, event):
-
-        if self._apply_filter:
-            self.apply_filter()
-        event.accept()
-
-    def clean(self):
-        """Remove temporary data from database."""
-
-        for table in self._sql.get_tables():
-            self._sql.delete_data(table, {'procset': "'tmp'"})
 
 
 class CurveFilter(QWidget):

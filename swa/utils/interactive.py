@@ -9,7 +9,7 @@ from matplotlib.backend_bases import MouseEvent
 
 from .utils import *
 
-from .physics import lorentzian_err
+from .physics import lorentzian_err, wavenumber, phase_velocity
 
 import numpy as np
 from collections.abc import Iterable
@@ -163,7 +163,7 @@ class DraggablePoints:
         return self._points
 
 
-class SeismoInteractive(DraggablePoints):
+class TXInteractive(DraggablePoints):
 
     def __init__(self, ax, receiver = None, points=None, data  = None, picks = None, **kwargs):
 
@@ -287,20 +287,28 @@ class SeismoInteractive(DraggablePoints):
             self.ax.set_title('Velocity estimation', fontweight='bold')
             self.canvas.draw_idle()
 
-    def filter(self):
-
-        kwargs = self._kwargs
-        taper_type = kwargs.pop('taper_type', 'tukey')
-        taper = kwargs.pop('tapering', 'mild')
+    def update_plot(self):
 
         if self._points:
-            self.data.linear_mute(self._points, key=self._key, taper = taper, taper_type = taper_type)
 
             # reset plot
             self._points = {}
             self._update_plot()
 
-        return self.data
+    # def filter(self):
+    #
+    #     kwargs = self._kwargs
+    #     taper_type = kwargs.pop('taper_type', 'tukey')
+    #     taper = kwargs.pop('tapering', 'mild')
+    #
+    #     if self._points:
+    #         self.data.linear_mute(self._points, key=self._key, taper = taper, taper_type = taper_type)
+    #
+    #         # reset plot
+    #         self._points = {}
+    #         self._update_plot()
+    #
+    #     return self.data
 
     @property
     def key(self):
@@ -347,20 +355,6 @@ class FKFilterInteractive(DraggablePoints):
             self._points = {}
             self._update_plot()
 
-    def filter(self):
-
-        kwargs = self._kwargs
-        taper_length = kwargs.pop('taper_length', 5)
-
-        if self._points:
-            self.data.apply_fk_filter(self._points, key = self._key, taper_length = taper_length)
-
-            # reset plot
-            self._points = {}
-            self._update_plot()
-
-        return self.data
-
     def _on_key(self, event):
         """keyboard events"""
         if event.key == 'e':
@@ -395,28 +389,37 @@ class DCPickingInteractive(DraggablePoints):
     """class for drawing boundaries for dispersion curve extraction"""
 
     def __init__(self, ax, points=None,
-                 data=None, freq=None, vel=None, power=None, offsets=None,
-                 err='lor', picks=None, **kwargs):
+                 data=None, freq=None, vel=None, power=None, offsets=None, picks=None, **kwargs):
 
         super().__init__(ax)
+
+        self.domain = kwargs.pop('domain', 'FV')
+
+        if self.domain == 'FV':
+            self._err = 'lor'
+        else:
+            self._err = 5
 
         # load data
         try:
             if data:
-                self._freq = getattr(data, 'frequency', None)
-                self._vel = getattr(data, 'velocity', None)
-                self._power = getattr(data, 'dispersive_energy', None)
+                if self.domain == 'FK':
+                    self._ydata = data.FK_data['freq']
+                    self._xdata = data.FK_data['kw']
+                    self._power = data.FK_data['FK_abs']
+                else:
+                    self._xdata = getattr(data, 'frequency', None)
+                    self._ydata = getattr(data, 'velocity', None)
+                    self._power = getattr(data, 'dispersive_energy', None)
                 self._offsets = getattr(data, 'offset', None)
             else:
-                self._freq = freq
-                self._vel = vel
+                self._xdata = freq
+                self._ydata = vel
                 self._power = power
                 self._offsets = offsets
         except Exception as e:
             self.logger.warning(f"Failed to extract data attributes: {e}")
-            self._freq = self._vel = self._power = self._offsets = None
-
-        self._err = err
+            self._xdata = self._ydata = self._power = self._offsets = None
 
         self._init_param()
         self._init_plot()
@@ -523,9 +526,19 @@ class DCPickingInteractive(DraggablePoints):
                     if self._mode not in self._pick_lines and not self._reset:
                         try:
                             picks = self._picks[self._mode]
+                            f = picks['frequency']
+                            v = picks['velocity']
+
+                            if self.domain == 'FK':
+                                x_data = wavenumber(f,v)
+                                y_data = f
+                            else:
+                                x_data = f
+                                y_data = v
+
                             pick_line, = self.ax.plot(
-                                picks['frequency'],
-                                picks['velocity'],
+                                x_data,
+                                y_data,
                                 marker="s",
                                 markersize=marker_size,
                                 markeredgecolor='k',
@@ -634,11 +647,11 @@ class DCPickingInteractive(DraggablePoints):
 
     def _extract_dccurve(self):
         """extract dispersion curve within boundary"""
-        if self._freq is None or self._vel is None or self._power is None:
+        if self._xdata is None or self._ydata is None or self._power is None:
             self.logger.warning("Frequency, velocity, and power must be defined.")
             return
 
-        fgrid, vgrid = np.meshgrid(self._freq, self._vel, indexing='xy')
+        fgrid, vgrid = np.meshgrid(self._xdata, self._ydata, indexing='xy')
         path = mpltPath.Path(self._polygons)
 
         # Test points inside polygon
@@ -652,8 +665,15 @@ class DCPickingInteractive(DraggablePoints):
         peaks_idx = masked_power.argmax(axis=0)
         cols = np.flatnonzero(flags.any(axis=0))
 
-        freq_pick = self._freq[cols]
-        vel_pick = self._vel[peaks_idx[cols]]
+        x_pick = self._xdata[cols]
+        y_pick = self._ydata[peaks_idx[cols]]
+
+        if self.domain == 'FK':
+            freq_pick = y_pick
+            vel_pick = phase_velocity(y_pick,x_pick)
+        else:
+            freq_pick = x_pick
+            vel_pick = y_pick
 
         self._picks[self._mode] = {'frequency': freq_pick, 'velocity': vel_pick}
         self._picks_prior[self._ppid] = {'frequency': freq_pick, 'velocity': vel_pick}

@@ -29,7 +29,7 @@ def frequency(lam,vel):
 
 def lorentzian_err(offsets, vel, f, nchannels = 24, dx = 1, **kwargs):
     """
-    Estimate dispersion-curve uncertainty after O'Neill (2002).
+    Estimate dispersion-curve uncertainty after O'Neill et al. (2003).
 
     Parameters
     ----------
@@ -54,6 +54,13 @@ def lorentzian_err(offsets, vel, f, nchannels = 24, dx = 1, **kwargs):
     -------
     deltac : float or np.ndarray
         Estimated dispersion-curve error.
+
+
+    References
+    ----------
+    O’Neill, A., Dentith, M., & List, R., 2003. Full-waveform P-SV
+    reflectivity inversion of surface waves for shallow engineering
+    applications, Exploration Geophysics, 34(3), 158–173.
     """
 
     maxerr = kwargs.get('maxerr', 0.4)

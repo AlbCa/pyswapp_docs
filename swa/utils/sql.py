@@ -487,44 +487,6 @@ class SQL:
         df = self.read_sql(sql)
         return sorted(df["wid"].tolist()) if not df.empty else []
 
-    # def group_pd(self, sin, procset='proc1', by = 'AVG'):
-    #     """Group phase difference data in case of repeated shots"""
-    #
-    #     recs = self.get_table('recs')
-    #
-    #     # Static columns
-    #     base_cols = ["procset", "calc", "sin", "rep", "wid", "fids", "frequency"]
-    #
-    #     # Aggregated receiver columns
-    #     pd_cols = [
-    #         f"{by}(pd{rin}) AS pd{rin}"
-    #         for rin in recs.rin.iloc[:-1]
-    #     ]
-    #
-    #     select_cols = ", ".join(base_cols + pd_cols)
-    #
-    #     sql = f"""
-    #         SELECT {select_cols}
-    #         FROM phase_differences
-    #         WHERE procset = '{procset}' AND sin = {sin}
-    #         GROUP BY fids
-    #     """
-    #
-    #     df = self.read_sql(sql).replace({None: np.nan})
-    #     df["calc"] = by
-    #
-    #     params = {
-    #         "sin": sin,
-    #         "procset": f"'{procset}'",
-    #         "wid": -1,
-    #         "calc": f"'{by}'"
-    #     }
-    #
-    #     # Insert or replace
-    #     if not self.check_data('phase_differences, params):
-    #         self.delete_data('phase_differences, params)
-    #     self.to_sql(df, name='phase_differences, if_exists="append", index=False)
-
     def write_pd(self, fids, freq, pd_data, sin, rep, procset='proc1'):
         """Write phase-difference data to SQL table 'phase_differences'."""
 

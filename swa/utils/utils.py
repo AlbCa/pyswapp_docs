@@ -34,6 +34,10 @@ def create_logging(name):
 
     return logger
 
+def assert_exists(path, check, kind):
+    """assert a path exists"""
+    if path and not check(path):
+        raise FileNotFoundError(f'{kind} "{path}" does not exist.')
 
 def create_projectdir(prjdir = ''):
     """create project directory"""
@@ -82,14 +86,12 @@ def get_num_from_str(string):
     if re.search(p, string) is not None:
         return re.findall(p, string)
 
-
 def natural_sort(l):
     """sort list based on numbers in ascending order"""
     convert = lambda text: int(text) if text.isdigit() else text.lower()
     alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
     return sorted(l, key=alphanum_key)
 
-# TODO add data index (e.g., sin, rep, wid)
 def read_filter(fin):
     """import existing filters from file"""
 
@@ -318,102 +320,6 @@ def get_fileList(path2raw):
 
     return None, None
 
-def save2DC(outfile, parkseis_params, freq, vel, snr):
-    """save dispersion curve in parkseis format"""
-
-    receiver = parkseis_params['receiver']
-    midpoint = parkseis_params['midpoint']
-    source = parkseis_params['source']
-    sn = parkseis_params['record_number']
-    channel = parkseis_params['channel']
-
-    f = open(outfile, 'w')
-    f.write(f'>>Start\t{len(freq)}\n')
-    for line in range(len(freq)):
-        f.write('%s\t%.3f\t%.3f\t%d\n' %
-                ('DATA',
-                 freq[line],
-                 vel[line],
-                 snr[line]))
-    f.write('>>End\n')
-    f.write(f'X-Coord: {midpoint}\n')
-    f.write(f'MidXYZ| {midpoint}| 0.000| 0.000\n')
-    f.write(f'SourceXYZ| {source}| 0.000| 0.000\n')
-    f.write(f'MidSTA| {channel[0]}| {channel[-1]}\n')
-    f.write(f'MidXForXcoord| {receiver[0]}\n')
-    f.write(f'XMinMax| {receiver[0]}| {receiver[-1]}\n')
-    f.write('   Distance Unit: meter\n')
-    f.write('TitleLabel|Dispersion\n')
-    f.write('FRQLabel|Frequency (Hz)\n')
-    f.write('PHSLabel|Phase Velocity (m/sec)\n')
-    f.write('RTOLabel|Signal-To-Noise Ratio (S/N)\n')
-    f.write(f'   Record No.      = {sn}\n')
-    f.write('Data Type = Dispersion\n')
-    f.close()
-
-
-def read_DC_Park(fname):
-    """read a dispersion curve file from ParkSEIS and store as csv with x,freq,phase_vel,snr columns"""
-
-    f = open(fname)  # open file
-    lines = f.readlines()  # lines in file
-
-    lsp = lines[0].split()
-    ndata = int(lsp[1])
-
-    dat = np.zeros((ndata, 3))
-    row = 0
-    for line in lines[1:]:
-        lsp = line.split()
-
-        if (lsp[0] == 'DATA') & (len(lsp) == 4):
-            dat[row, 0] = float(lsp[1])  # freq
-            dat[row, 1] = float(lsp[2])  # phase vel
-            dat[row, 2] = float(lsp[3])  # snr
-
-            row += 1
-
-        if lsp[0] == '>>End':
-            print('end of line')
-            break
-
-    if ndata != len(dat):
-        print('data size not matching')
-
-    x = 0
-    for line in lines[len(dat) + 2:]:
-
-        lsp = line.split()
-        if lsp[0] == 'X-Coord:':
-            x = float(lsp[1])
-            break
-
-    return dat, x
-
-
-def DC2csv(fpath,prjdir):
-    """convert a dispersion curve file from ParkSEIS to a csv file"""
-
-    dat,x = read_DC_Park(fpath)
-
-    if os.path.isdir(prjdir + "0c_csv/") == False:
-        os.mkdir(prjdir + "0c_csv/")
-
-    path, fname = os.path.split(fpath)
-    pre, ext = os.path.splitext(fname)
-    outfile = prjdir + f"0c_csv/{pre}.csv"
-
-    f = open(outfile,'w')
-    f.write('#Frequency,Velocity\n')
-    for line in range(len(dat)):
-        f.write('%.9f,%.9f\n' %
-                (dat[line,0],
-                 dat[line,1]))
-    f.close()
-
-    return outfile,x
-
-
 def read_DC_csv(fname):
     """read a dispersion curve file from a csv file"""
     dat = np.genfromtxt(fname,skip_header=1,delimiter=',')
@@ -441,7 +347,7 @@ def combine_dict(d1, d2):
 
 # %% helper functions for waveform transformation
 def nextpow2(A):
-    """exponent of next higher power of 2 (see matlab)"""
+    """exponent of next higher power of 2"""
     p = 1
     count = 0
     while p < abs(A):

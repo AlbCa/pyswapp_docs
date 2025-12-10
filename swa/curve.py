@@ -45,11 +45,7 @@ class DispersionCurve:
     def read(self, fname):
         """import data from file"""
 
-        if fname.endswith('.dat') or fname.endswith('.Dat'):
-            dat, _ = read_DC_Park(fname)
-            err = None
-
-        elif fname.endswith('.csv'):
+        if fname.endswith('.csv'):
             dat, _ = read_DC_csv(fname)
             err = dat[:, 2]
 
@@ -265,18 +261,6 @@ class DispersionCurve:
 
             save2csv(outfile, np.asarray(data.frequency), np.asarray(data.velocity), np.asarray(data.error))
 
-        elif format in ['ParkSeis','PS','dat','DAT']:
-
-            if parkseis_params is not None:
-                safe_makedirs(os.path.join(prjdir, "0_DC"))
-
-                outfile = prjdir + f"/01_DC/{pre}.DC"
-
-                f = data.frequency.values
-                vel = data.velocity.values
-                snr = np.ones_like(f)
-
-                save2DC(outfile, parkseis_params, f, vel, snr)
         else:
             raise ValueError(f"Data format not provided. "
                              f"Choose one of the formats: {'csv'} or {['ParkSeis','PS','dat','DAT']}.")

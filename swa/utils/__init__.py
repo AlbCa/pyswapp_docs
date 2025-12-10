@@ -1,5 +1,5 @@
 from .sql import SQL
-from .interactive import SeismoInteractive, FKFilterInteractive, DCPickingInteractive
+from .interactive import TXInteractive, FKFilterInteractive, DCPickingInteractive
 
 from .inversion import *
 from .plotting import *
