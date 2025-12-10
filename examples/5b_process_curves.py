@@ -51,7 +51,7 @@ swam.plot_curves(apply_to = 'cur', procset= 'new2',
 
 # filter the dispersion curve
 swam.load_procset(procset)
-processing_kwargs = {'pmin':30, 'pmax':40, 'param':'f'}
+processing_kwargs = {'pmin':30, 'pmax':40, 'param':'frequency'}
 swam.process_curves(apply_to = 'cur', procset= 'new3',
                     type='filter', method='MOPA', **processing_kwargs)
 swam.plot_curves(apply_to = 'cur', procset= 'new3',
