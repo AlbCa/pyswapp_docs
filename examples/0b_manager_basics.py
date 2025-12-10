@@ -21,6 +21,7 @@ swam = BaseManager(f'{prj_dir}/proc/0b_basics', # project directory path
                    path2geom=path2geom,                     # optional, copy geom from path (outside project directory)
                    settings=settings,                       # optional, define settings for visualisations and processing
                    rename = False,                          # optional, rename copied raw data to preferred filename format (Shotfile_<index>), default value is False!
+                   overwrite = False,                       # optional, overwrite database .db file if it already exists --> create new project data base
                    )
 
 
@@ -78,31 +79,43 @@ swam.preprocess(type = 'trim', by = 'offset', min = 5, max = 1e6, which = 'both'
 
 # %% 4. view data
 # 4.1 Data viewer
-swam.gui_view()
-
-# 4.2 create single plot of currently selected data
-swam.plot('geometry')
-swam.plot('seismogram', amp_scale = 1, color = 'k')
-swam.plot('FK')
-swam.plot('spectra')
-swam.plot('spectrogram')
-swam.plot('SFR')
-
-# %% 5. wave field transformation
-# perform wavefield transformation based on the phaseshift and fdbf methods
-swam.transform(method = 'phaseshift')
-swam.transform(method = 'fdbf')
-swam.plot('FV', method = 'phaseshift')
-swam.plot('FV', method = 'fdbf')
+# swam.gui_view()
+#
+# # 4.2 create single plot of currently selected data
+# swam.plot('geometry')
+# swam.plot('seismogram', amp_scale = 1, color = 'k')
+# swam.plot('FK')
+# swam.plot('spectra')
+# swam.plot('spectrogram')
+# swam.plot('SFR')
+#
+# # %% 5. wave field transformation
+# # perform wavefield transformation based on the phaseshift and fdbf methods
+# swam.transform(method = 'phaseshift')
+# swam.transform(method = 'fdbf')
+# swam.plot('FV', method = 'phaseshift')
+# swam.plot('FV', method = 'fdbf')
 
 
 # %% 6. Interactive viewer
 # filter data in FK-domain
-swam.gui_interact('FK')
+swam.gui_interact('filter',domain = 'FK')
 
-# pick dispersion curves in FV-domain
-swam.gui_interact('FV')
+# # filter data in TX-domain
+swam.gui_interact('filter',domain = 'TX')
 
+# pick dispersion curves (in FV (based on phaseshift or fdbf) or FK domain possible -> can be selected in app)
+swam.gui_interact('pick')
+
+# plot results for data picked with phaseshift transform
+swam.plot('curve', method = 'phaseshift')
+swam.plot('pseudosection', method = 'phaseshift')
+
+# plot results for data picked with fdbf transform
+swam.plot('curve', method = 'phaseshift')
+swam.plot('pseudosection', method = 'phaseshift')
+
+# plot results for data picked with FK transform
 swam.plot('curve', method = 'phaseshift')
 swam.plot('pseudosection', method = 'phaseshift')
 
