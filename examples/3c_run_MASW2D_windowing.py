@@ -13,35 +13,24 @@ procset = 'proc2' # processing set label
 settings = create_settings(fmin=5, fmax=80,                  # frequency range
                          vmin=10, vmax=1000, velstep=1)     # testing phase velocity range and step
 
-swam = MASW2DManager(f'{prj_dir}/proc/3c_MASW2D',path2raw=path2raw,path2geom=path2geom, settings=settings)
-
-# load data from database based on procset label
-#swam.load_procset('raw')
-
-# set a new procset label
-swam.set_procset_label(procset)
+swam = MASW2DManager(f'{prj_dir}/proc/3c_MASW2D',path2raw=path2raw,path2geom=path2geom, settings=settings, overwrite=True)
 
 # Run moving window along data
 swam.moving_window(minoffset = 3, maxoffset = 1e6, wlen = 24, wmove = 1)
 swam.preprocess(type='check_traces')
 
-# print(swam._sql.get_tables())
-# print(swam._sql.get_trafo_labels('proc1'))
-
-# transform data for all files (type='fdbf')
-swam.transform(type='phaseshift')
-swam.transform(type='fdbf')
+# transform
+swam.transform(method='fdbf')
 
 # manual dc picking
-swam.gui_interact('FV',use_windows=True)
+swam.gui_interact('pick')
 
-# extract the dispersion curves automatically
+# # extract the dispersion curves automatically
 swam.extract_curves(method = 'max')
+swam.extract(method = 'MOPA', stopAtChi2 = 1, rel_err = 1/100)
 
-swam.extract(method = 'MOPA', stopAtChi2 = 1, rel_err = 1/100, showResults = True)
-
-# plot the corresponding pseudosections
-swam.plot('pseudosection',method = 'phaseshift')
+# # plot the corresponding pseudosections
+# swam.plot('pseudosection',method = 'phaseshift')
 swam.plot('pseudosection',method = 'fdbf')
 swam.plot('pseudosection',method = 'max')
 swam.plot('pseudosection',method = 'MOPA')
