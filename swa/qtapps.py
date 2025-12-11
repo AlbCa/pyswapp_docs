@@ -1,6 +1,6 @@
 import copy
-
-import numpy as np
+import time
+import sys
 
 from .utils.utils import *
 from .utils.interactive import *
@@ -1121,12 +1121,18 @@ class DataSwitcherFilter(DataSwitcherBase):
 
     def write_filtered_data(self):
 
+        starttime = time.time()
+
         if self.is_grouped:
             labels = [label for group in self.all_labels for label in group]
         else:
             labels = self.all_labels
 
         for sin, rep, wid in labels:
+
+            sys.stdout.write(f'\rApplying FK filter to (SIN,REP,WID) = ({sin}, {rep}, {wid}) and writing to database..... ')
+            sys.stdout.flush()
+
             stream = self.select_data(sin, rep)
             self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
 
@@ -1134,6 +1140,9 @@ class DataSwitcherFilter(DataSwitcherBase):
             stream.tapered_amps = 1
 
             self._write_data(stream, sin, rep, self.procset, wid)
+
+        endtime = time.time()
+        print(f'{np.round(endtime - starttime, 2)} s')
 
     def closeEvent(self, event):
 

@@ -29,7 +29,11 @@ class BaseManager:
         assert_exists(path2raw, os.path.isdir, "Raw data folder")
         assert_exists(path2geom, os.path.isfile, "Geometry file")
 
-        self.app = QApplication(sys.argv)
+        # ensure single QApplication
+        self.app = QApplication.instance()
+        if self.app is None:
+            self.app = QApplication([])
+        #self.app = QApplication(sys.argv)
 
         self.prjdir = prjdir
         self.path2raw = path2raw
