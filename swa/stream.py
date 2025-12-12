@@ -2511,11 +2511,6 @@ class SeismicStream:
         omega = np.arange(npts) * (omega_fs / npts)
         freq = omega / (2 * np.pi)
 
-        min_id = np.argmin(np.abs(freq - self.fmin))
-        max_id = np.argmin(np.abs(freq - self.fmax))
-        fids = np.arange(min_id, max_id + 1, step=self.fstep)
-        freq = freq[fids]
-
         # fft
         u = np.fft.fft(amps)/amps.shape[1]
         df = (1/self.df)/amps.shape[1]
@@ -2523,7 +2518,7 @@ class SeismicStream:
         # absolute amplitudes in db
         abs_amps = np.empty((len(freq), len(receiver)))
         for row in range(len(receiver)):
-            ui = np.abs(u[row, fids])
+            ui = np.abs(u[row, :])
             abs_amps[:, row] = ui
         abs_amps[np.isnan(abs_amps)] = 0
 
@@ -2622,11 +2617,6 @@ class SeismicStream:
         omega = np.arange(npts) * (omega_fs / npts)
         freq = omega / (2 * np.pi)
 
-        min_id = np.argmin(np.abs(freq - self.fmin))
-        max_id = np.argmin(np.abs(freq - self.fmax))
-        fids = np.arange(min_id, max_id + 1, step=self.fstep)
-        freq = freq[fids]
-
         # fft
         u = np.fft.fft(amps)/amps.shape[1]
         df = (1/self.df)/amps.shape[1]
@@ -2634,7 +2624,7 @@ class SeismicStream:
         # compute absolute normalized psd
         norm_amps = np.zeros((len(freq), len(receiver)))
         for row in range(len(receiver)):
-            ui = np.abs(u[row, fids])
+            ui = np.abs(u[row, :])
             norm_amps[:, row] =ui
 
         cmap = getattr(plt.cm, kwargs.pop('cmap', 'viridis'))
