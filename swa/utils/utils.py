@@ -236,8 +236,6 @@ def create_geometry(path2raw: str, path2geom: str = "geometry.csv") -> None:
         logger.error('Files with ".syn" extension do not contain geometry information.')
         return
 
-    geom = pd.DataFrame(columns=['x','y','z','geo','shot','first_geo','ngeo'])
-
     # add receiver stations first
     geom_rows = []
 
