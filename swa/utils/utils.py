@@ -203,7 +203,7 @@ def get_shotfiles_from_geometry(path2raw, shot_files, extension = '.sg2', sort_a
     return path2sht
 
 
-def create_geometry(path2shts, path2geom = 'geometry.csv'):
+def create_geometry(path2raw: str, path2geom: str = "geometry.csv") -> None:
     """
     create a geometry.csv from seismic shot files (.sgy and .sg2 file formats)
 
@@ -214,100 +214,103 @@ def create_geometry(path2shts, path2geom = 'geometry.csv'):
 
     Parameters
     ----------
-    path2shts: list, paths to shot files
+    path2raw: str, paths to shot files
     path2geom: str, path to geometry file
     """
 
-    if '.syn' in path2shts[0]:
-        print('Seismic data with extension ".syn" does not contain geometry information.')
+    from swa.stream import SeismicStream
+
+    logger = create_logging(name="Create Geometry")
+
+    if not os.path.isdir(path2raw):
+        logger.error(f"Path {path2raw} does not exist.")
         return
 
-    from swa.stream import SeismicStream
+    shot_files = natural_sort([entry.path for entry in os.scandir(path2raw) if entry.is_file()])
+
+    if not shot_files:
+        logger.error(f"No data in {path2raw}.")
+        return
+
+    if shot_files[0].endswith(".syn"):
+        logger.error('Files with ".syn" extension do not contain geometry information.')
+        return
 
     geom = pd.DataFrame(columns=['x','y','z','geo','shot','first_geo','ngeo'])
 
     # add receiver stations first
-    nids = 0
-    for i in range(len(path2shts)):
+    geom_rows = []
 
-        # seismic stream containing survey geometry
-        stream = SeismicStream(path2shts[i])
-        stream.read_data(path2shts[i], channel_nr=1001, extract_geometry = True)
+    for path in shot_files:
+        stream = SeismicStream(path)
+        stream.read_data(path, channel_nr=1001, extract_geometry=True)
+        stream.set_shot_params()
 
-        # shot parameters
-        stream.set_shot_params()                    # set the shot parameters from the seismic data
-        receiver = stream.receiver                  # geophone x-coordinates
-        ngeo = stream.nchannels                     # number of geophones
-        nids += ngeo
+        receivers = stream.receiver
+        ngeo = stream.nchannels
 
-        if len(np.unique(receiver)) != ngeo:
-            raise ValueError('Unique geophone coordinates does not match expected number of geophones. '
-                             f'{len(np.unique(receiver))} != {ngeo}')
+        if len(np.unique(receivers)) != ngeo:
+            logger.error(f"Unique geophone coordinates do not match expected count "
+                         f"({len(np.unique(receivers))} != {ngeo}) in file {path}")
+            return
 
-        df = pd.DataFrame({'x':receiver,
-                           'y': 0,
-                           'z': 0,
-                           'geo': 1,
-                           'shot': '-1',
-                           'first_geo': 1,
-                           'ngeo': -1})
+        # add geophone rows
+        for r in receivers:
+            geom_rows.append(dict(x=r, y=0, z=0, geo=1, shot="-1", first_geo="-1", ngeo="-1"))
 
-        geom = pd.concat([geom, df])
-        nids += ngeo
+    # remove duplicates & sort
+    geom = pd.DataFrame(geom_rows).drop_duplicates(subset=["x"]).sort_values("x")
+    geom.insert(0, "id", np.arange(len(geom)))
+    geom.reset_index(drop=True, inplace=True)
 
-    geom = geom.drop_duplicates(subset=['x']).reset_index(drop=True)
-    geom = geom.sort_values(by = 'x')
-    geom.insert(0, 'id', np.arange(len(geom)))
+    x_to_id = dict(zip(geom.x.values, geom.id.values))
 
     # add the shots
-    for i in range(len(path2shts)):
+    for i in range(len(shot_files)):
 
         # seismic stream containing survey geometry
-        stream = SeismicStream(path2shts[i])
-        stream.read_data(path2shts[i], channel_nr=1001, extract_geometry = True)
-
-        # shot parameters
+        stream = SeismicStream(shot_files[i])
+        stream.read_data(shot_files[i], channel_nr=1001, extract_geometry = True)
         stream.set_shot_params()                    # set the shot parameters from the seismic data
+
         first_geo = stream.receiver[0]              # first geophone
         ngeo = stream.nchannels                     # number of geophones
-        name = stream.pre                           # file name
-        sin = str(int(get_num_from_str(name)[0]))   # numerical part of file
         source = stream.source                      # source x-coordinate
-        nids += ngeo
+        sin = str(int(get_num_from_str(stream.pre )[0]))   # numerical part of file
 
-        sid = np.where(geom.x == source)[0]
-        first_geo_id = int(geom.id[geom.x == first_geo].item())
-        first_geo_id += 1
+        if first_geo not in x_to_id:
+            logger.error(f"Receiver {first_geo} not found in geometry table.")
+            return
+        first_geo_id = x_to_id[first_geo] + 1
 
-        if len(sid) > 0:
-            if geom.loc[sid[0],'shot'] == '-1':
-                geom.loc[sid[0],'shot'] = sin
-                geom.loc[sid[0], 'first_geo'] = str(first_geo_id)
-                geom.loc[sid[0], 'ngeo'] = str(ngeo)
-            else:
-                geom.loc[sid[0],'shot'] += ';' + sin
-                geom.loc[sid[0],'first_geo'] += ';' + str(first_geo_id)
-                geom.loc[sid[0],'ngeo'] += ';' + str(ngeo)
-
+        if source in x_to_id:
+            sid = x_to_id[source]
+            geom.loc[sid,'shot'] = _append_to_str_field(geom.loc[sid, "shot"], sin)
+            geom.loc[sid, 'first_geo'] = _append_to_str_field(geom.loc[sid, "first_geo"], str(first_geo_id))
+            geom.loc[sid, 'ngeo'] = _append_to_str_field(geom.loc[sid, "ngeo"], str(ngeo))
         else:
-            tmp_dict = {'x':source,
-                       'y': 0,
-                       'z': 0,
-                       'geo': 0,
-                       'shot': sin,
-                       'first_geo': first_geo_id,
-                       'ngeo': ngeo}
+            # new source row
+            new_row = dict(
+                x=source,
+                y=0,
+                z=0,
+                geo=0,
+                shot=sin,
+                first_geo=str(first_geo_id),
+                ngeo=str(ngeo),
+            )
+            geom = pd.concat([geom, pd.DataFrame([new_row])], ignore_index=True)
+            x_to_id[source] = geom.index[-1]
 
-            df = pd.DataFrame([tmp_dict])
-            geom = pd.concat([geom, df])
-            geom.reset_index(drop=True, inplace=True)
-
-    geom = geom.sort_values(by='x')
-    geom = geom.drop(columns=['id'])
-    geom['shot'].astype(str)
-    geom['first_geo'].astype(str)
-    geom['ngeo'].astype(str)
+    geom = geom.sort_values("x").drop(columns=["id"])
+    geom = geom.astype({"shot": str, "first_geo": str, "ngeo": str})
     geom.to_csv(path2geom, index=False, header=False)
+    logger.info(f"Geometry written to {path2geom}")
+
+def _append_to_str_field(existing: str, new: str) -> str:
+    if existing == "-1":
+        return new
+    return f"{existing};{new}"
 
 def get_fileList(path2raw):
     """get the paths to the shot files from the geometry.csv file"""
