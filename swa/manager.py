@@ -1,12 +1,10 @@
-
-import sys
-import time
-import collections
-
 from .utils import *
 from .stream import SeismicStream
 from .curves import CombineCurves
 from .qtapps import *
+
+#TODO: filter based on radon domain
+#TODO: remove raw from db?
 
 class BaseManager:
     def __init__(self, prjdir, path2raw=None, path2geom=None, settings=None, database='swa.db', overwrite = False, **kwargs):
@@ -393,6 +391,16 @@ class BaseManager:
         else:
             raise KeyError(f'The key sin = {sin} does not exist.')
 
+    def delete(self, procset = None, table = 'amps', params = None):
+
+        if params is None:
+            params = {}
+
+        procset = procset or self._procset
+        params["procset"] = f"'{procset}'"
+
+        self._sql.delete_data(table, params)
+
     def _preprocess(self, type, procset=None, use_windows = True, **kwargs):
         """apply preprocessing steps to current selection or all data sets"""
 
@@ -664,7 +672,7 @@ class BaseManager:
                 trafo_labels = self._sql.get_trafo_labels(procset, use_windows=True)
 
             # if transformation exists set dispersive energy
-            if len(trafo_labels) > 0:
+            if (len(trafo_labels) > 0) and (method != 'MOPA'):
                 self._set_FV(tmp, sin, rep, procset, wid, method=trafo_labels[-1])
 
             self._extract_dc(tmp, sin = sin, rep = rep, wid = wid, procset=procset,
@@ -963,7 +971,7 @@ class BaseManager:
         _, recs_all = self._sql.get_geometry(sin='*')
         params = {'procset': f"'{procset}'", 'method': f"'{method}'", 'dc_mode': f"{dc_mode}"}
         curves = self._sql.read_curve(params)
-        dx = np.median(abs(np.diff(recs_all.rx)))
+        dx = kwargs.pop('width', np.median(abs(np.diff(recs_all.rx))))
 
         if curves.empty:
             self.logger.warning('No dispersion curves in database. Pseudosection not visualized.')
@@ -1003,9 +1011,9 @@ class BaseManager:
         if show:
             plt.tight_layout()
             plt.show()
+            return None
 
         return ax
-
 
     def plot(self, type='seismogram', procset = None, use_windows=True, **kwargs):
         """
@@ -1029,6 +1037,8 @@ class BaseManager:
             self.plot_curve(procset,use_windows, **kwargs)
         else:
             self._plot(type,procset,use_windows,**kwargs)
+
+        return None
 
     def get_figures(self, type = ''):
         """return plot for each data set"""
@@ -1097,8 +1107,7 @@ class BaseManager:
         print('Loading the GUI ..... ', end="")
         starttime = time.time()
 
-        sin, rep = self.selected_ids
-        wids = self._sql.get_wids(sin, rep, self._loadset)
+        wids = self._sql.wids_exist(self._loadset)
 
         if wids and use_windows:
             window = DualDataSwitcher(self.data, self.path2db, plot=domain,
@@ -1162,8 +1171,7 @@ class BaseManager:
         print('Loading the GUI ..... ', end="")
         starttime = time.time()
 
-        sin, rep = self.selected_ids
-        wids = self._sql.get_wids(sin, rep, self._loadset)
+        wids = self._sql.wids_exist(self._loadset)
 
         if wids and use_windows:
             window = DualDataSwitcher(self.data, self.path2db, plot=type, DataSwitcher=DataSwitcher,
@@ -1954,15 +1962,16 @@ class Tomo2DManager(BaseManager):
         else:
             self.plot_streams(type,procset,apply_to,use_windows,**kwargs)
 
-    def prepare_streams(self, min_offset=-np.inf, max_offset=np.inf, min_rec = 6, procset = None):
+    def prepare_streams(self, min_offset=-np.inf, max_offset=np.inf, min_rec = 6, max_rec = None, procset = None):
         """
         retrieve subsets of the data based on forward and reverse offset shots
 
         Parameters
         ----------
-        min_offset : float, minimum offset to consider for trimming stream
-        max_offset : float, maximum offset to consider for trimming stream
+        min_offset : float, minimum offset (in m) to consider for trimming stream
+        max_offset : float, maximum offset (in m) to consider for trimming stream
         min_rec : int, mininum number of receivers to keep for trimming down data
+        max_rec : int, maximum number of receivers to keep for trimming down data
         procset : str, identifier to set on which dataset the processing should be applied to
 
         """
@@ -1973,12 +1982,17 @@ class Tomo2DManager(BaseManager):
         if procset != self._procset:
             self.set_new_procset(procset)
 
+        info = False
+
         starttime = time.time()
 
         for sin in self.data.keys():
             for rep in self.data[sin].keys():
 
-                windows = []
+                info_fw = False
+                info_rw = False
+                wid = -1
+
                 sys.stdout.write(f'\rTrimming data based on offset (SIN,REP) = ({sin}, {rep}) ..... ')
                 sys.stdout.flush()
 
@@ -1986,23 +2000,32 @@ class Tomo2DManager(BaseManager):
 
                 # forward shots
                 stream_fw = copy.deepcopy(current_stream)
-                oids = stream_fw.trim_by_offset(min_offset, max_offset)
+                oids = stream_fw.trim_by_offset(min_offset, max_offset, nrec= max_rec)
 
                 if len(oids) >= min_rec:
-                    windows.append(stream_fw)
+                    wid += 1
+                    self._write_data(stream_fw, sin, rep, procset, wid)
+                else:
+                    info_fw = True
 
                 # reverse shots
                 stream_rw = copy.deepcopy(current_stream)
-                oids = stream_rw.trim_by_offset( -max_offset, -min_offset)
+                oids = stream_rw.trim_by_offset( -max_offset, -min_offset, nrec= max_rec)
 
                 if len(oids) >= min_rec:
-                    windows.append(stream_rw)
+                    wid += 1
+                    self._write_data(stream_rw, sin, rep, procset, wid)
+                else:
+                    info_rw = True
 
-                for wid, st in enumerate(windows):
-                    self._write_data(st, sin, rep, procset, wid)
+                info = info_fw and info_rw
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
+
+        if info:
+            self.logger.warn("Some shot files didn't fulfill the user-defined near-/far-offset definition."
+                             "\n No trimming was applied to those.")
 
         self.set_loadset(procset)
 
@@ -2104,9 +2127,10 @@ class Tomo2DManager(BaseManager):
 
                 current_stream = self.select_data(sin=sin, rep=rep, inplace=False, verbose=False)
 
-                wids = self._sql.get_wids(sin, rep, procset)
-                if not wids:
+                if not self._sql.wids_exist(procset):
                     wids = [-1]
+                else:
+                    wids = self._sql.get_wids(sin, rep, procset)
 
                 for wid in wids:
 
@@ -2209,6 +2233,10 @@ class Tomo2DManager(BaseManager):
                 else:
                     pd_mean = self._sql.read_pd(sin, procset, calc='NONE')
                     pd_std = None
+
+                # if no data exits continue with next iteration
+                if pd_mean is None:
+                    continue
 
                 # FORWARD (offset > 0)
                 fwd_mask = (

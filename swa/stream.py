@@ -4,7 +4,8 @@ import os.path
 from collections import OrderedDict
 import numbers
 
-from scipy import signal, special
+import numpy as np
+from scipy import signal, special, sparse
 from scipy import interpolate
 import obspy
 import obspy.signal
@@ -834,7 +835,7 @@ class SeismicStream:
             warn_msg = f'Start and end time must be numeric not {type(start_cut_off), type(end_cut_off)}. No process applied.'
             self.logger.warning(warn_msg)
 
-    def trim_by_offset(self, min_offset, max_offset):
+    def trim_by_offset(self, min_offset, max_offset, nrec = None):
         """cut traces outside of the offsets limits"""
 
         if self._pst is None:
@@ -849,8 +850,14 @@ class SeismicStream:
 
             oids = np.argwhere((offset >= min_offset) & (offset <= max_offset))[:, 0]
 
-            if len(oids) > 0:
+            if (nrec is not None) and (isinstance(nrec, numbers.Number)):
 
+                if (min_offset < 0) and (max_offset < 0):
+                    oids = oids[-nrec:]
+                else:
+                    oids = oids[:nrec]
+
+            if len(oids) > 0:
                 st_new = obspy.Stream()
                 for i in oids:
                     st_new.append(st_proc[i])
@@ -1478,6 +1485,8 @@ class SeismicStream:
             self._fdbf()
         elif method.lower() == 'phaseshift':
             self._phaseshift()
+        elif method.lower() == 'radon':
+            self._inverse_radon()
         else:
             raise NotImplementedError(f'Transformation "{method}" not supported. '
                                       f'Use one of the keys: {keys}')
@@ -1695,8 +1704,8 @@ class SeismicStream:
     #         w[-m:] = w[:m][::-1]
     #
     #     return x * w
-
-    # def _inverse_radon(self, t, delta, M, p, weights, ref_dist,
+    #
+    # def _inverse_radon(self, weights = None,
     #                        line_model='linear',
     #                        inversion_model='L2',
     #                        hyperparameters=None):
@@ -1713,42 +1722,93 @@ class SeismicStream:
     #     doi: 10.1029/2007JB005009.
     #     """
     #
+    #     dt = self.dt
+    #     receiver = self.receiver
+    #     source = self.source
+    #     offsets = self._aoffsets(receiver, source)
+    #
+    #     # amplitude data & processing
+    #     if self._pst is None:
+    #         st = self._st.copy()
+    #     else:
+    #         st = self._pst.copy()
+    #
+    #     amps = self._amps(st=st)
+    #
+    #     if self.pad:
+    #         amps,_,_ = self._zero_padding(amps)
+    #     if self.norm_amps:
+    #         amps = self._normalize_amps(amps)
+    #
+    #     # sample size
+    #     iX, iT = amps.shape
+    #     iF = nextpow2(iT)[1]
+    #
+    #     if source > receiver[-1]:
+    #         offsets = np.flipud(offsets)
+    #         amps = np.flipud(amps)
+    #
+    #     # time axis
+    #     t = np.arange(iT) * dt
+    #
+    #     # offset axis
+    #     delta = offsets
+    #     ref_dist = np.mean(delta)
+    #
+    #     # amplitudes of phase arrivals
+    #     M = amps
+    #
+    #     if not weights:
+    #         weights = np.ones(delta.size)
+    #
+    #     # frequency range
+    #     omega_fs = 2 * np.pi * 1/dt
+    #     omega = np.arange(iT) * (omega_fs/iT)
+    #     freq = omega/(2*np.pi)
+    #
+    #     min_id = np.argmin(np.abs(freq - self.fmin))
+    #     max_id = np.argmin(np.abs(freq - self.fmax))
+    #     fids = np.arange(min_id, max_id + 1, step=self.fstep)
+    #     #freq = freq[fids]
+    #
+    #     # testing phase velocity
+    #     vels = np.arange(self.vmin, self.vmax, self.vstep)
+    #     p = 1/vels # slowness
+    #
     #     # Apply cosine taper to each trace
     #     M = M.copy()
     #     for ii in range(M.shape[0]):
-    #         M[ii, :] = cos_taper(M[ii, :])
+    #         M[ii, :] = self._cos_taper(M[ii, :])
     #
     #     # Basic sizes
-    #     it = len(t)
-    #     iF = 2 ** (int(np.ceil(np.log2(it))) + 1)  # same as pow2(nextpow2 + 1)
     #     iDelta = len(delta)
     #     ip = len(p)
     #     iw = len(weights)
     #
-    #     # Dimension checks
-    #     if M.shape != (iDelta, it):
-    #         raise ValueError("size(M) must be [len(delta), len(t)]")
-    #
-    #     if iw != iDelta:
-    #         raise ValueError("len(weights) must equal len(delta)")
-    #
     #     # Hyperparameters check
     #     if inversion_model.upper() in ['L1', 'CAUCHY']:
-    #         if len(hyperparameters) != 2:
-    #             raise ValueError("L1 and Cauchy require two hyperparameters")
+    #
+    #         if not hyperparameters:
+    #             hyperparameters = [5e-2,1e-8]
+    #         elif len(hyperparameters) != 2:
+    #             self.logger.error("L1 and Cauchy require two hyperparameters")
+    #             return
     #     else:  # default L2
-    #         if len(hyperparameters) != 1:
-    #             raise ValueError("L2 requires one hyperparameter")
+    #         if not hyperparameters:
+    #             hyperparameters = [5e-2]
+    #         elif len(hyperparameters) != 1:
+    #             self.logger.error("L2 requires one hyperparameter")
+    #             return
     #
     #     # Allocate outputs
-    #     R = np.zeros((ip, it))
+    #     R = np.zeros((ip, iT))
     #     Rfft = np.zeros((ip, iF), dtype=complex)
     #
     #     # Distance array
     #     Dist_array = delta - ref_dist
     #     dF = 1 / (t[0] - t[1])
-    #     Mfft = fft(M, n=iF, axis=1)
-    #     W = spdiags(weights, 0, iDelta, iDelta)
+    #     Mfft = np.fft.fft(M, n=iF, axis=1)
+    #     W = sparse.spdiags(weights, 0, iDelta, iDelta)
     #
     #     # Build Tshift matrix
     #     Tshift = np.zeros((iDelta, ip))
@@ -1762,7 +1822,7 @@ class SeismicStream:
     #             Tshift[:, k] = p[k] * Dist_array
     #
     #     # Identity in sparse form
-    #     Ident = speye(ip)
+    #     Ident = sparse.eye(ip)
     #
     #     # Frequency loop
     #     fvec = np.zeros(iF // 2 + 1)
@@ -1802,9 +1862,9 @@ class SeismicStream:
     #
     #             for _ in range(20):
     #                 if inversion_model.upper() == 'CAUCHY':
-    #                     Q = spdiags(1.0 / (np.abs(Rcur) ** 2 + b), 0, ip, ip)
+    #                     Q = sparse.spdiags(1.0 / (np.abs(Rcur) ** 2 + b), 0, ip, ip)
     #                 else:  # L1
-    #                     Q = spdiags(1.0 / (np.abs(Rcur) + b), 0, ip, ip)
+    #                     Q = sparse.spdiags(1.0 / (np.abs(Rcur) + b), 0, ip, ip)
     #
     #                 # Solve (lam*Q + AtA) x = AtM
     #                 Rnew = np.linalg.solve(AtA + lam * Q.toarray(), AtM)
@@ -1832,7 +1892,16 @@ class SeismicStream:
     #             Rfft[:, iF - i] = np.conj(Rfft[:, i])
     #
     #     # Inverse FFT to get R(t)
-    #     R = ifft(Rfft, axis=1).real[:, :it]
+    #     R = np.fft.ifft(Rfft, axis=1).real[:, :iT]
+    #
+    #     print(Rfft.shape, p.shape, fvec.shape)
+    #
+    #     fig,ax = plt.subplots()
+    #     img = ax.imshow(
+    #                        Rfft,
+    #                        #extend='both',
+    #                        cmap=plt.cm.get_cmap('Greys'))
+    #     plt.show()
     #
     #     return R, Rfft, fvec
 

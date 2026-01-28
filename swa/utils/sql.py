@@ -477,6 +477,16 @@ class SQL:
 
         return velocities, wavenumbers, freq_vals, FV
 
+    def wids_exist(self, procset):
+        """check if windows exist"""
+
+        sql = ("""SELECT DISTINCT wid
+                 FROM amplitudes
+                 WHERE procset=='%s'AND wid!=-1""" % procset)
+
+        df = self.read_sql(sql)
+        return True if not df.empty else False
+
     def get_wids(self, sin, rep, procset):
         """return the window ids for a sin/rep pair"""
 

@@ -407,7 +407,7 @@ class DataSwitcherBase(QWidget):
         try:
             label = self.labels[self.current_index]
         except Exception:
-            self.logger.error("Invalid current_index in create_figure.")
+            #self.logger.error("Invalid current_index in create_figure.")
             return None
 
         try:
@@ -859,13 +859,14 @@ class DataSwitcherPick(DataSwitcherBase):
     def show_popup(self):
         """Help popup with keyboard shortcuts."""
         text = "\n".join((
-            'Left mouse click in dispersion image: add a point with a confidence interval.',
-            'Left mouse click and hold: Drag added point.',
-            'Right mouse click on point: delete point.',
-            'Press numbers 0–9 to set dispersion curve mode index.',
-            'Press d: Delete boundary.',
-            'Press r: Reset picks.',
-            'Mouse Scroll: Adjust boundary tightness.'
+            'Keyboard commands:',
+            '- Left mouse click in dispersion image: add a point with a confidence interval.',
+            '- Left mouse click and hold: Drag added point.',
+            '- Right mouse click on point: delete point.',
+            '- Press numbers 0–9 to set dispersion curve mode index.',
+            '- Press d: Delete boundary.',
+            '- Press r: Reset picks.',
+            '- Mouse Scroll: Adjust boundary tightness.'
         ))
 
         msg = QMessageBox()
@@ -976,6 +977,8 @@ class DataSwitcherFilter(DataSwitcherBase):
 
         self.ftype = plot
 
+        self.flag = False
+
         self.canvas1 = FigureCanvas()
         self.seis_kwargs = {'show_xticks': False, 'title': None, 'figsize': (7.2, 8)}
 
@@ -1004,14 +1007,14 @@ class DataSwitcherFilter(DataSwitcherBase):
         try:
             label = self.labels[self.current_index]
         except Exception:
-            self.logger.error("Invalid current_index in create_figure.")
+            #self.logger.error("Invalid current_index in create_figure.")
             return None
 
         sin, rep, wid = label
         try:
             stream = self.select_data(sin, rep)
             self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
-            self.stream = self.apply_filter(stream, sin, rep, wid)
+            self.stream,self.flag = self.apply_filter(stream, sin, rep, wid)
 
         except Exception as err:
             self.logger.error(f"Error setting data: {err}")
@@ -1049,7 +1052,7 @@ class DataSwitcherFilter(DataSwitcherBase):
             self.points[self.current_index] = self.interactor.points
             self.picks[self.current_index] = self.interactor.picks
 
-    def interact(self):
+    def interact_filter(self):
         """Apply filter based on interaction points."""
         try:
             if not self.interactor:
@@ -1077,13 +1080,43 @@ class DataSwitcherFilter(DataSwitcherBase):
         except Exception as e:
             self.logger.exception(f"Interaction failed: {e}")
 
+    def interact_save(self):
+        """Save filtered data to database."""
+
+        label = self.labels[self.current_index]
+        sin, rep, wid = label
+
+        self.write_current_filtered_data(self.stream, self.flag, sin, rep, wid)
+
+    def interact_delete(self):
+        """Delete data from database."""
+
+        label = self.labels[self.current_index]
+        sin, rep, wid = label
+
+        procset = self.procset
+
+        params = {'sin': sin, 'rep': rep, 'wid': wid, 'procset': "'%s'" % procset}
+        self._sql.delete_data('amplitudes', params)
+
+        self.update_display()
+        self.canvas.setFocus()
+
     def show_popup(self):
-        """Show keyboard shortcuts for TX filter."""
+        """Information"""
         text = "\n".join((
-            f'Left mouse click in {self.ftype} plot: add a point.',
-            'Left mouse click and hold: drag added point.',
-            'Right mouse click on point: delete point.',
-            'Press t for top or b for bottom filter.'
+            'Workflow:',
+            '1.  Add points with left mouse click.',
+            '2.a Press button "Filter|Reset" to mute data.',
+            '2.b Optionally, press button "Filter|Reset" again to reset filter.',
+            '3.  Press button "Save" to store filtered data in database.',
+            '4.  Press button "Delete" to remove data from database.',
+            '',
+            'Keyboard commands:',
+            f'- Left mouse click in {self.ftype} plot: add a point.',
+            '- Left mouse click and hold: drag added point.',
+            '- Right mouse click on point: delete point.',
+            '- Press t for top or b for bottom filter.'
         ))
         msg = QMessageBox()
         msg.setWindowTitle('Information')
@@ -1117,7 +1150,31 @@ class DataSwitcherFilter(DataSwitcherBase):
             if self.ftype == 'FK':
                 stream.apply_fk_filter([pt, pb], ["t", "b"])
 
-        return stream
+            return stream, True
+
+        return stream, False
+
+
+    def write_current_filtered_data(self, stream, flag, sin, rep, wid):
+
+        if flag:
+
+            starttime = time.time()
+
+            sys.stdout.write(
+                f'\rApplying FK filter to (SIN,REP,WID) = ({sin}, {rep}, {wid}) and writing to database..... ')
+            sys.stdout.flush()
+
+            if self.ftype == 'FK':
+                stream.tapered_amps = 1
+
+            self._write_data(stream, sin, rep, self.procset, wid)
+
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
+
+        else:
+            self.logger.info(f'No filter applied to (SIN,REP,WID) = ({sin}, {rep}, {wid}).')
 
     def write_filtered_data(self):
 
@@ -1130,25 +1187,37 @@ class DataSwitcherFilter(DataSwitcherBase):
 
         for sin, rep, wid in labels:
 
-            sys.stdout.write(f'\rApplying FK filter to (SIN,REP,WID) = ({sin}, {rep}, {wid}) and writing to database..... ')
-            sys.stdout.flush()
-
             stream = self.select_data(sin, rep)
             self.data_exists = self._set_data(stream, sin, rep, self.procset, wid)
 
-            stream = self.apply_filter(stream, sin, rep, wid)
-            stream.tapered_amps = 1
+            stream, flag = self.apply_filter(stream, sin, rep, wid)
 
-            self._write_data(stream, sin, rep, self.procset, wid)
+            if flag:
+                sys.stdout.write(
+                    f'\rApplying FK filter to (SIN,REP,WID) = ({sin}, {rep}, {wid}) and writing to database..... ')
+                sys.stdout.flush()
+
+                if self.ftype == 'FK':
+                    stream.tapered_amps = 1
+
+                self._write_data(stream, sin, rep, self.procset, wid)
 
         endtime = time.time()
         print(f'{np.round(endtime - starttime, 2)} s')
 
-    def closeEvent(self, event):
+    def add_button(self, label, width = 100):
 
-        if self._apply_filter:
-            self.write_filtered_data()
-        event.accept()
+        btn = QPushButton(label)
+        btn.setFixedSize(width, 40)
+        self.nav_layout.addWidget(btn)
+
+        return btn
+
+    # def closeEvent(self, event):
+    #
+    #     if self._apply_filter:
+    #         self.write_filtered_data()
+    #     event.accept()
 
 
 class DataSwitcherFilterTX(DataSwitcherFilter):
@@ -1220,9 +1289,10 @@ class DataSwitcherFilterTX(DataSwitcherFilter):
                 self.nav_layout.addWidget(self.combo_select_sin)
 
             if self.interaction_class:
-                self.interact_btn = QPushButton(self.btn_label)
-                self.interact_btn.setFixedSize(100, 40)
-                self.nav_layout.addWidget(self.interact_btn)
+                self.interact_btn_filt = self.add_button(self.btn_label)
+                self.interact_btn_save = self.add_button('Save', width = 60)
+                self.interact_btn_del = self.add_button('Delete', width = 60)
+
 
             self.popup_btn = QPushButton()
             icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
@@ -1243,7 +1313,9 @@ class DataSwitcherFilterTX(DataSwitcherFilter):
             self.right_btn.clicked.connect(self.show_next_figure)
 
             if self.interaction_class:
-                self.interact_btn.clicked.connect(self.interact)
+                self.interact_btn_filt.clicked.connect(self.interact_filter)
+                self.interact_btn_save.clicked.connect(self.interact_save)
+                self.interact_btn_del.clicked.connect(self.interact_delete)
 
             # Canvas
             self.fig_layout = QHBoxLayout()
@@ -1405,9 +1477,9 @@ class DataSwitcherFilterFK(DataSwitcherFilter):
                 self.nav_layout.addWidget(self.combo_select_sin)
 
             if self.interaction_class:
-                self.interact_btn = QPushButton(self.btn_label)
-                self.interact_btn.setFixedSize(100, 40)
-                self.nav_layout.addWidget(self.interact_btn)
+                self.interact_btn_filt = self.add_button(self.btn_label)
+                self.interact_btn_save = self.add_button('Save', width = 60)
+                self.interact_btn_del = self.add_button('Delete', width = 60)
 
             self.popup_btn = QPushButton()
             icon = QApplication.style().standardIcon(QStyle.SP_MessageBoxInformation)
@@ -1429,7 +1501,9 @@ class DataSwitcherFilterFK(DataSwitcherFilter):
             self.right_btn.clicked.connect(self.show_next_figure)
 
             if self.interaction_class:
-                self.interact_btn.clicked.connect(self.interact)
+                self.interact_btn_filt.clicked.connect(self.interact_filter)
+                self.interact_btn_save.clicked.connect(self.interact_save)
+                self.interact_btn_del.clicked.connect(self.interact_delete)
 
             # Canvas
             self.fig_layout = QHBoxLayout()
