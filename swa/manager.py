@@ -1,3 +1,5 @@
+import pandas as pd
+
 from .utils import *
 from .stream import SeismicStream
 from .curves import CombineCurves
@@ -436,6 +438,44 @@ class BaseManager:
         """
         self._preprocess(type, procset, use_windows, **kwargs)
 
+    def save_filter(self, fname = 'filter.csv', ftype='FK', procset=None):
+        """
+        Save filter to file in tabular format
+
+        Parameters
+        ----------
+        fname: str, filename to save data to disk
+        procset :  str, identifier to set on which dataset the processing should be applied to
+        ftype : string, default 'FK', filter type
+
+        """
+
+        procset = procset or self._procset
+
+        params = {
+            'procset': f"'{procset}'",
+            'type': f"'{ftype}'",
+        }
+
+        try:
+            df = self._sql.read_filter(params)
+            df.to_csv(fname, index=False)
+        except:
+            self.logger.error('Filter could not be saved to file.')
+
+    def import_filter(self,fname):
+        """
+        Read filter from file in tabular format
+
+        Parameters
+        ----------
+        fname: str, filename to import
+
+        """
+
+        df = pd.read_csv(fname)
+        self._sql.to_sql(df, name='filter', if_exists='append', index=False)
+
     def read_filter(self, ftype='FK', procset=None, use_windows=True, uniq_per_rep = False, uniq_per_wid = False):
         """
         Read manual filter from database.
@@ -484,7 +524,7 @@ class BaseManager:
 
         return points_top, points_bot
 
-    def apply_filter(self,ftype='FK', points_top = None, points_bot = None,procset=None, use_windows=True, **kwargs):
+    def _apply_filter(self,ftype='FK', points_top = None, points_bot = None,procset=None, use_windows=True, **kwargs):
         """
         Apply manual filter from database.
 
@@ -530,6 +570,23 @@ class BaseManager:
             tmp_stream.tapered_amps = 1
             self._write_data(tmp_stream, sin, rep, procset, wid)
 
+    def apply_filter(self,ftype='FK', points_top = None, points_bot = None,procset=None, use_windows=True, **kwargs):
+        """
+        Apply manual filter from database.
+
+        Parameters
+        ----------
+        ftype : string, default 'FK', filter type
+        points_top : list, top filter
+        points_bot : list, bottom filter
+        procset :  str, identifier to set on which dataset the processing should be applied to
+        use_windows : bool, default True, whether to apply the processing to windows
+        kwargs
+
+        """
+
+        self._apply_filter(ftype, points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
+
     def apply_filter_2D(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
                        uniq_per_rep = False, uniq_per_wid = False, **kwargs):
         """
@@ -558,7 +615,7 @@ class BaseManager:
 
             points_top, points_bot = self.read_filter(ftype =ftype, procset = procset, use_windows = use_windows,
                                                       uniq_per_rep = uniq_per_rep, uniq_per_wid = uniq_per_wid)
-            self.apply_filter(ftype, points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
+            self._apply_filter(ftype, points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -575,7 +632,7 @@ class BaseManager:
                     sys.stdout.flush()
 
                     points_top, points_bot = self.read_filter('FK', procset, use_windows)
-                    self.apply_filter('FK', points_top, points_bot, procset, use_windows, **kwargs)
+                    self._apply_filter('FK', points_top, points_bot, procset, use_windows, **kwargs)
 
             endtime = time.time()
             print(f'{np.round(endtime - starttime, 2)} s')
@@ -1336,6 +1393,24 @@ class MASW2DManager(BaseManager):
 
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
 
+    def apply_filter(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
+                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+        """
+        Apply filter to current selection or all data sets
+
+        Parameters
+        ----------
+        procset : str, identifier to set on which dataset the processing should be applied to
+        apply_to : str, default 'all', whether to apply function to all streams or just the current selection
+        use_windows : bool, default True, whether to apply the processing to windows
+        ftype : string, default 'FK', filter type
+        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        """
+
+        self.apply_filter_2D(procset, apply_to, use_windows, ftype,
+                       uniq_per_rep, uniq_per_wid, **kwargs)
+
     def transform_streams(self, method='phaseshift', procset = None, apply_to = 'all', use_windows=True, **kwargs):
         """
         Apply wavefield transformation to current selection or all data sets
@@ -2095,6 +2170,24 @@ class Tomo2DManager(BaseManager):
         """
 
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
+
+    def apply_filter(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
+                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+        """
+        Apply filter to current selection or all data sets
+
+        Parameters
+        ----------
+        procset : str, identifier to set on which dataset the processing should be applied to
+        apply_to : str, default 'all', whether to apply function to all streams or just the current selection
+        use_windows : bool, default True, whether to apply the processing to windows
+        ftype : string, default 'FK', filter type
+        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        """
+
+        self.apply_filter_2D(procset, apply_to, use_windows, ftype,
+                       uniq_per_rep, uniq_per_wid, **kwargs)
 
     def compute_phasediff(self, procset = None):
         """

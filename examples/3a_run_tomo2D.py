@@ -23,12 +23,11 @@ swam = Tomo2DManager(f'{prj_dir}/proc/3a_tomo2D',settings=settings, overwrite=Tr
 #
 # # Retrieve subsets from data corresponding to forward and reverse shots
 swam.prepare_streams(min_offset=2, max_offset=1e6, min_rec =16, max_rec=48)
-#
-# # # # Apply preprocessing steps to the data (e.g., FK filtering based on existing filters)
-# # # FK_kwargs = {'fname':path2fk, # specify a file name from which FK filter should be imported
-# # #              'show':False,     # show the filtered FK spectrum
-# # #               }
-# # # swam.preprocess_streams(type='filter', by = 'FK', **FK_kwargs)
+
+# # Apply preprocessing steps to the data (e.g., FK filtering based on existing filters)
+# FK_kwargs = {'fname':'/home/Natalie/Documents/Projects/GIT/swa/data/syn_data/testing/FKfilter.txt', # specify a file name from which FK filter should be imported
+#               }
+# swam.preprocess_streams(type='filter', by = 'FK', **FK_kwargs)
 #
 # # # FK filtering interactively)
 swam.gui_interact('filter','FK')

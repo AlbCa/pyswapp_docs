@@ -92,13 +92,13 @@ def natural_sort(l):
     alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
     return sorted(l, key=alphanum_key)
 
-def read_filter(fin):
+def read_filter(fname):
     """import existing filters from file"""
 
     points_top = {}
     points_bot = {}
 
-    with open(fin, 'r') as f:
+    with open(fname, 'r') as f:
         lines = f.readlines()
 
     i = 0
@@ -128,9 +128,9 @@ def read_filter(fin):
         else:
             i += 1
 
-    return points_top, points_bot
+    return [points_top], [points_bot]
 
-def write_filter(fout, points, key):
+def write_filter(fname, points, key):
     """export filter to file"""
 
     if len(points) == 0:
@@ -139,7 +139,7 @@ def write_filter(fout, points, key):
     # points is assumed to be a dict {x: y}
     x, y = zip(*sorted(points.items()))
 
-    with open(fout, "w") as f:
+    with open(fname, "w") as f:
         f.write(f"{key}\t{len(x)}\n")
         for xi, yi in zip(x, y):
             f.write(f"{xi:.4f}\t{yi:.4f}\n")
