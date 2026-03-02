@@ -459,6 +459,8 @@ class BaseManager:
 
         try:
             df = self._sql.read_filter(params)
+            df.sort_values(['sin', 'rep','wid','key'], ascending=[True, True,True,True], inplace=True)
+
             df.to_csv(fname, index=False)
         except:
             self.logger.error('Filter could not be saved to file.')
@@ -474,6 +476,18 @@ class BaseManager:
         """
 
         df = pd.read_csv(fname)
+
+        procset = df['procset'].unique()[0]
+        filter_type = df['type'].unique()[0]
+
+        params = {
+            "procset": f"'{procset}'",
+            "type": f"'{filter_type}'",
+        }
+
+        if not self._sql.check_data('filter', params):
+            self._sql.delete_data('filter', params)
+
         self._sql.to_sql(df, name='filter', if_exists='append', index=False)
 
     def read_filter(self, ftype='FK', procset=None, use_windows=True, uniq_per_rep = False, uniq_per_wid = False):
