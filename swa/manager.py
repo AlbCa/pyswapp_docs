@@ -490,7 +490,7 @@ class BaseManager:
 
         self._sql.to_sql(df, name='filter', if_exists='append', index=False)
 
-    def read_filter(self, ftype='FK', procset=None, use_windows=True, uniq_per_rep = False, uniq_per_wid = False):
+    def read_filter(self, ftype='FK', procset=None, use_windows=True, uniq_per_rep = True, uniq_per_wid = True):
         """
         Read manual filter from database.
 
@@ -499,8 +499,8 @@ class BaseManager:
         ftype : string, default 'FK', filter type
         procset :  str, identifier to set on which dataset the processing should be applied to
         use_windows : bool, default True, whether to apply the processing to windows
-        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
-        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        uniq_per_rep : bool, default True, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default True, whether a unique filter exists for each wid
 
         Returns
         -------
@@ -602,7 +602,7 @@ class BaseManager:
         self._apply_filter(ftype, points_top, points_bot, procset=procset, use_windows=use_windows, **kwargs)
 
     def apply_filter_2D(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
-                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+                       uniq_per_rep = True, uniq_per_wid = True, **kwargs):
         """
         Apply filter to current selection or all data sets
 
@@ -612,8 +612,8 @@ class BaseManager:
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default True, whether to apply the processing to windows
         ftype : string, default 'FK', filter type
-        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
-        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        uniq_per_rep : bool, default True, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default True, whether a unique filter exists for each wid
         """
 
         if procset is None:
@@ -645,7 +645,8 @@ class BaseManager:
                     sys.stdout.write(f'\rApplying FK filter to (SIN,REP) = ({sin}, {rep}) ..... ')
                     sys.stdout.flush()
 
-                    points_top, points_bot = self.read_filter('FK', procset, use_windows)
+                    points_top, points_bot = self.read_filter('FK', procset, use_windows,
+                                                      uniq_per_rep = uniq_per_rep, uniq_per_wid = uniq_per_wid)
                     self._apply_filter('FK', points_top, points_bot, procset, use_windows, **kwargs)
 
             endtime = time.time()
@@ -1408,7 +1409,7 @@ class MASW2DManager(BaseManager):
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
 
     def apply_filter(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
-                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+                       uniq_per_rep = True, uniq_per_wid = True, **kwargs):
         """
         Apply filter to current selection or all data sets
 
@@ -1418,8 +1419,8 @@ class MASW2DManager(BaseManager):
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default True, whether to apply the processing to windows
         ftype : string, default 'FK', filter type
-        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
-        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        uniq_per_rep : bool, default True, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default True, whether a unique filter exists for each wid
         """
 
         self.apply_filter_2D(procset, apply_to, use_windows, ftype,
@@ -2186,7 +2187,7 @@ class Tomo2DManager(BaseManager):
         self.preprocess_streams(type, procset, apply_to, use_windows, **kwargs)
 
     def apply_filter(self, procset=None, apply_to='all', use_windows=True, ftype = 'FK',
-                       uniq_per_rep = False, uniq_per_wid = False, **kwargs):
+                       uniq_per_rep = True, uniq_per_wid = True, **kwargs):
         """
         Apply filter to current selection or all data sets
 
@@ -2196,8 +2197,8 @@ class Tomo2DManager(BaseManager):
         apply_to : str, default 'all', whether to apply function to all streams or just the current selection
         use_windows : bool, default True, whether to apply the processing to windows
         ftype : string, default 'FK', filter type
-        uniq_per_rep : bool, default False, whether a unique filter exists for each rep
-        uniq_per_wid : bool, default False, whether a unique filter exists for each wid
+        uniq_per_rep : bool, default True, whether a unique filter exists for each rep
+        uniq_per_wid : bool, default True, whether a unique filter exists for each wid
         """
 
         self.apply_filter_2D(procset, apply_to, use_windows, ftype,
