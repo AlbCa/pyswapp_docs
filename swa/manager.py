@@ -2277,7 +2277,8 @@ class Tomo2DManager(BaseManager):
 
         self.set_loadset(procset)
 
-    def run(self, min_offset=3, max_offset=1e6, lam = 1, abs_err = None, rel_err = None, procset = None, **kwargs):
+    def run(self, min_offset=3, max_offset=1e6, lam = 1, abs_err = None, rel_err = None, procset = None,
+            opt_lam = False, scale = 0.6, lam_max = 200, **kwargs):
         """
         Run the tomographic like approach
 
@@ -2288,6 +2289,9 @@ class Tomo2DManager(BaseManager):
         lam : int, regularization strength
         rel_err : float or None, default None, error to consider in the error-weighted least-squares approach
         procset : str, identifier to set on which dataset the processing should be applied to
+        opt_lam: bool, use constant lambda or find optimum lambda per iteration
+        scale: float, percentage value to decrease lambda
+        lam_max: int, maximum value of lambda
 
         """
 
@@ -2402,12 +2406,15 @@ class Tomo2DManager(BaseManager):
             A = A[~id]
             dphi = dphi[~id.reshape((-1,))]
             variance = variance[~id.reshape((-1,))]
-            #variance = np.full_like(dphi, np.var(dphi)) #
 
             # Weight matrix
             weights = 1.0 / variance
 
             w = np.diag(weights)
+
+            if opt_lam:
+                starttime = time.time()
+                lam = lambda_search(f=f, A=A, dphi=dphi, w=w, lam_max=lam_max,scale=scale)
 
             # Solve system
             phi_vel, dphi_resp = tomo2D_phasediff(lam=lam, f=f, A=A, dphi=dphi, w=w)
@@ -2415,13 +2422,10 @@ class Tomo2DManager(BaseManager):
 
             _,_, chi2 = compute_chi2(dphi,dphi_resp, variance)
 
-            # print output
-            print('#'*45 + '\n')
-            text = (f'f = {np.round(f,2)} Hz, '
-                    f'‖x_pre - x_obs‖ = {np.linalg.norm(dphi_resp - dphi).round(3)}'
-                    )  + '\n'
-            print(text)
-            #print('#' * 80  + '\n')
+            if opt_lam:
+                print(f"{f:6.2f} Hz | λ = {lam} | Cost = {np.linalg.norm(dphi_resp - dphi):.3f}")
+            else:
+                print(f"{f:6.2f} Hz | Cost = {np.linalg.norm(dphi_resp - dphi):.3f}")
 
             # plot results
             if kwargs.setdefault('showResults', False):

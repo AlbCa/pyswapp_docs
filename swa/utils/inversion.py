@@ -92,3 +92,31 @@ def tomo2D_phasediff(lam,f,A,dphi,w):
     phi_model = A @ m  # predicted phase differences
 
     return phi_vel, phi_model
+
+
+def lambda_search(f,A,dphi,w, scale = 0.6, lam_max = 200):
+    """ Search for optimum weight
+
+    Parameters
+    ----------
+    f : float, frequency value of the analysis
+    A : np.ndarray, design matrix
+    dphi : np.ndarray, phase differences
+    w : np.ndarray, weights
+    scale: float, percentage value to decrease lambda
+    lam_max: int, maximum value of lambda
+
+    Returns
+    -------
+    lam: int, optimal lambda
+
+    """
+
+    k = np.arange(int(np.log(1 / lam_max) / np.log(scale)) + 2)
+    lam = (lam_max * scale ** k)
+    lam = np.unique(lam[lam >= 1].astype(int))
+
+    Cost = np.array([np.linalg.norm(dphi - tomo2D_phasediff(l, f, A, dphi, w)[1]) for l in lam])
+
+    return lam[np.argmin(Cost)]
+
