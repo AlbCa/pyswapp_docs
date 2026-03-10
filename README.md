@@ -1,25 +1,43 @@
-# SWA
-**swa** is an open-source Python library for processing surface wave seismic data.
+# pySWApp - an interactive, open-source python toolbox for processing seismic surface wave data
+
+by
+Nathalie Roser, Ilaria Barone, Alberto Carrera and Adrián Flores Orozco
+
+---
+
+## Abstract
+
+We introduce the open-source python library pySWApp, which provides a flexible 
+and semi-interactive framework for managing and processing 2D active seismic 
+surface wave data for dispersion curve analysis. Among classical approaches for 
+surface-wave analysis such as the Multichannel Analysis of Surface Waves (MASW), 
+pySWApp encompasses advanced approaches for extracting dispersion curves under 
+laterally challenging conditions: the Multi-Offset Phase Analysis (MOPA) and the 
+Tomographic-Like Approach (Tomo2D).
 
 ---
 
 ## 📁 Folder and File Structure
 
-- `swa.yml`  
-  Conda environment file for setting up the required dependencies.
+The source code of the pySWApp library is in the `code` folder.
+Synthetic data to reproduce the exemplary use cases presented in the 
+manuscript are provided in the `data` folder. 
+Exemplary scripts to showcase the libraries key functions are  provided in 
+the `examples` folder. 
+The pdf of the manuscript are in the `docs` folder.
 
 ---
 
-### **Library: `swa`**
+### **Library: `pyswapp`**
 Contains the core processing routines:
+- **`manager.py`**  
+  describe the new class...
 - **`stream.py`**  
   Main class for reading, processing, visualizing, and transforming seismic shot gathers.
 - **`curve.py`**  
   Class for handling dispersion curves (read, process, visualize, save).
 - **`curves.py`**  
   Combines multiple dispersion curves (e.g., from repeated shots) using binning for error estimation.
-- **`manager.py`**  
-  describe the new class...
 - **`_init_.py`**  
   describe the new class...
 - **`utils`**  
@@ -76,8 +94,42 @@ Directory for raw and processed data:
 
 ---
 
+## Dependencies
+
+You'll need a working Python environment to run the code.
+The recommended way to set up your environment is through the
+[Anaconda Python distribution](https://www.anaconda.com/download/) which
+provides the `conda` package manager.
+
+The required dependencies are specified in the file `environment.yml`.
+
+Open a terminal (Linux & Mac) or the Anaconda Prompt (Windows) and run the 
+following command in the repository folder (where `environment.yml`
+is located) to create a new environment and install the required
+dependencies:
+
+    conda env create
+
+---
+
 ## 🚀 Getting Started
 
 1. Clone the repository:
    ```bash
    git clone https://github.com/AlbCa/swa.git
+   
+
+2. Installing the library
+
+To use the pySWApp library we suggest to install it in an conda 
+environment. Run the following lines to activate the corresponding environment 
+and start the setup process.
+
+    conda activate <env_name>
+    cd code
+    pip install .
+
+## License
+
+All source code is made available under the MIT License. See LICENSE.md for 
+the full license text.
