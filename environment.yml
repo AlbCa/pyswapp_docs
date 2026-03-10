@@ -1,4 +1,4 @@
-name: swa-test
+name: pyswapp
 channels:
     - conda-forge
     - defaults
