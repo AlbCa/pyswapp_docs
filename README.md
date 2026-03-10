@@ -17,7 +17,7 @@ Tomographic-Like Approach (Tomo2D).
 
 ---
 
-## 📁 Folder and File Structure
+## Folder and File Structure
 
 The source code of the pySWApp library is in the `code` folder.
 Synthetic data to reproduce the exemplary use cases presented in the 
@@ -47,39 +47,20 @@ Contains the core processing routines:
 ---
 
 ### **Examples**
-Scripts demonstrating various use cases:
-- **`0_create_geometry.py`**  
+Scripts and Jupyter Notebooks demonstrating various use cases:
+- **`0_create_geometry`**  
   Create and read a `geometry.csv` file.
-- **`1_manager_basics.py`**  
+- **`1_manager_basics`**  
   An overview of basic capabilities applied to a single shot gather.
-- **`2a_run_MASW2D.py`**  
+- **`2a_run_MASW2D`**  
   Exemplary use of the MASW2D Manager.
-- **`2b_run_MASW2D_windowing.py`**  
+- **`2b_run_MASW2D_windowing`**  
   Exemplary use of the MASW2D Manager with additional spatial windowing.
-- **`3_run_tomo2d.py`**  
+- **`3_run_tomo2d`**  
   Exemplary use of the Tomo2D Manager.
-- **`4a_combine_curves.py`**  
+- **`4a_combine_curves`**  
   Dispersion curve combination.
-- **`4b_process_curves.py`**  
-  Post-processing of dispersion curves.
-
----
-
-### **Notebooks**
-Jupyter notebooks demonstrating the same use cases:
-- **`0_create_geometry.ipynb`**  
-  Create and read a `geometry.csv` file.
-- **`1_manager_basics.ipynb`**  
-  An overview of basic capabilities applied to a single shot gather.
-- **`2a_run_MASW2D.ipynb`**  
-  Exemplary use of the MASW2D Manager.
-- **`2b_run_MASW2D_windowing.ipynb`**  
-  Exemplary use of the MASW2D Manager with additional spatial windowing.
-- **`3_run_tomo2d.ipynb`**  
-  Exemplary use of the Tomo2D Manager.
-- **`4a_combine_curves.ipynb`**  
-  Dispersion curve combination.
-- **`4b_process_curves.ipynb`**  
+- **`4b_process_curves`**  
   Post-processing of dispersion curves.
 
 ---
@@ -115,7 +96,7 @@ dependencies:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 1. Clone the repository:
    ```bash
