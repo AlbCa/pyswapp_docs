@@ -120,10 +120,10 @@ dependencies:
 
 2. Installing the library
 
-   To use the pySWApp library we suggest to install it in an conda 
-   environment. Run the following lines to activate the corresponding environment 
-   and start the setup process.
-
+    To use the pySWApp library we suggest to install it in an conda 
+    environment. Run the following lines to activate the corresponding environment 
+    and start the setup process.
+    ```bash
     conda activate <env_name>
     cd code
     pip install .
