@@ -31,41 +31,56 @@ The pdf of the manuscript are in the `docs` folder.
 ### **Library: `pyswapp`**
 Contains the core processing routines:
 - **`manager.py`**  
-  describe the new class...
+  Classes tailored for processing active 1D and 2D surface-wave analysis.
 - **`stream.py`**  
-  Main class for reading, processing, visualizing, and transforming seismic shot gathers.
+  Class for handling seismic shot gathers.
 - **`curve.py`**  
-  Class for handling dispersion curves (read, process, visualize, save).
+  Class for handling dispersion curves.
 - **`curves.py`**  
-  Combines multiple dispersion curves (e.g., from repeated shots) using binning for error estimation.
-- **`_init_.py`**  
-  describe the new class...
+  Class for combining multiple dispersion curves.
+- **`qtapps.py`**  
+  PyQT5 apps for interactive data handling.
 - **`utils`**  
-  describe the new folder...
+  A set of utility functions for import and export of files, plotting, physical relations, 
+  and solving linear mathematical systems.
 
 ---
 
 ### **Examples**
 Scripts demonstrating various use cases:
-- **`0a_create_geometry.py`**  
+- **`0_create_geometry.py`**  
   Create and read a `geometry.csv` file.
-- **`0b_manager_basics.py`**  
-  An overview of the new manager.
-- **`3a_run_tomo2d.py`**  
-  Perform a tomography-like 2D analysis and visualize results.
-- **`4a_run_MASW2D.py`**  
-  Run the MASW pseudo-2D approach with dispersion curve combination.
-- **`4b_run_MASW2D_mopa.py`**  
-  Run the MASW pseudo-2D approach with mopa approach.
-- **`4c_run_MASW2D_windowing.py`**  
-  Run the MASW pseudo-2D approach with windowing approach.
-- **`5a_combine_curves.py`**  
+- **`1_manager_basics.py`**  
+  An overview of basic capabilities applied to a single shot gather.
+- **`2a_run_MASW2D.py`**  
+  Exemplary use of the MASW2D Manager.
+- **`2b_run_MASW2D_windowing.py`**  
+  Exemplary use of the MASW2D Manager with additional spatial windowing.
+- **`3_run_tomo2d.py`**  
+  Exemplary use of the Tomo2D Manager.
+- **`4a_combine_curves.py`**  
   Dispersion curve combination.
+- **`4b_process_curves.py`**  
+  Post-processing of dispersion curves.
 
 ---
 
 ### **Notebooks**
-Interactive Jupyter notebooks to be created...
+Jupyter notebooks demonstrating the same use cases:
+- **`0_create_geometry.ipynb`**  
+  Create and read a `geometry.csv` file.
+- **`1_manager_basics.ipynb`**  
+  An overview of basic capabilities applied to a single shot gather.
+- **`2a_run_MASW2D.ipynb`**  
+  Exemplary use of the MASW2D Manager.
+- **`2b_run_MASW2D_windowing.ipynb`**  
+  Exemplary use of the MASW2D Manager with additional spatial windowing.
+- **`3_run_tomo2d.ipynb`**  
+  Exemplary use of the Tomo2D Manager.
+- **`4a_combine_curves.ipynb`**  
+  Dispersion curve combination.
+- **`4b_process_curves.ipynb`**  
+  Post-processing of dispersion curves.
 
 ---
 
@@ -75,22 +90,10 @@ Directory for raw and processed data:
   Synthetic data set.
   - **`proc/`**  
     Processed data.
-    - **`swa_v2/`**  
-      Applied FK filters.
-      - **`3a_tomo2D/`**  
-        describe the new folder...
-      - **`3b_MASW2D/`**  
-        describe the new folder...
+    - **`1_basics/`**  
+      Project folder containing processing outputs.
   - **`raw/`**  
     Original raw data.
-  - **`geometry_v2.csv`**  
-    Manually created geometry file.
-  - **`geometry_test.csv`**  
-    Automatically created geometry file.
-- **`real_data/`**  
-  Real data sets.
-  - **`Moriago/`**  
-    2D active dataset.
 
 ---
 
