@@ -1812,9 +1812,6 @@ class SeismicStream:
         # Final results: dispersion curve
         if len(picked_vels) > 0:
 
-            if kwargs.setdefault("showResults", False):
-                self._plotMOPA(results_dict_plotting, **kwargs)
-
             self._pick = True
             self.picks[self._pck_mode] = {
                 0: {
@@ -1823,6 +1820,10 @@ class SeismicStream:
                     "chi2": np.array(picked_chi2),
                 }
             }
+
+            if kwargs.setdefault("showResults", False):
+                ax = self._plotMOPA(results_dict_plotting, **kwargs)
+                plt.show()
 
         else:
             self.logger.warning("No dispersion curve extracted.")
@@ -2876,7 +2877,7 @@ class SeismicStream:
 
         return fig
 
-    def _plotMOPA(self, data, stop=1, axes=None, outfile=None, **kwargs):
+    def _plotMOPA(self, data, stop=1, axes=None, **kwargs):
 
         if axes is None:
             fig,ax = plt.subplots(3, 1, figsize=(8, 8))
@@ -2956,8 +2957,6 @@ class SeismicStream:
 
         plt.tight_layout()
 
-        if outfile:
-            fig.savefig(outfile)
-            plt.close()
-        else:
-            plt.show()
+        return ax
+
+
