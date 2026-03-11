@@ -87,7 +87,7 @@ class SeismicStream:
         self.use_local_max = self._settings['local_max'].item() # use local maxima
 
         # DC picking settings
-        self._pck_mode = self._settings['picking_mode'].item() # picking mode
+        self._pck_mode = 'manual' # picking mode
 
         # wave field transformation settings
         self.fmin = self._settings['fmin'].item()  # min frequency
@@ -1813,7 +1813,7 @@ class SeismicStream:
         if len(picked_vels) > 0:
 
             self._pick = True
-            self.picks[self._pck_mode] = {
+            self.picks['auto'] = {
                 0: {
                     "frequency": np.array(picked_freqs),
                     "velocity": np.array(picked_vels),
@@ -2924,14 +2924,14 @@ class SeismicStream:
                           edgecolor=ec, linewidth=0.8, zorder=2,
                           label=label, alpha=0.7)
 
-        if kwargs.setdefault('showResults', True):
-            # %% dispersion curve obtained in classical sense as comparison
-            self._fdbf()
-            self.dcpicking(pck_mode='auto')
-            f_fdbf = self.picks['auto'][0]['frequency']
-            v_fdbf = self.picks['auto'][0]['velocity']
-            ax[2].scatter(f_fdbf, v_fdbf, marker="s", s=25, c='k',
-                          edgecolor='k', linewidth=0.8, zorder=-2, label='FDBF')
+        # if kwargs.setdefault('showResults', True):
+        #     # %% dispersion curve obtained in classical sense as comparison
+        #     self._fdbf()
+        #     self.dcpicking(pck_mode='auto')
+        #     f_fdbf = self.picks['auto'][0]['frequency']
+        #     v_fdbf = self.picks['auto'][0]['velocity']
+        #     ax[2].scatter(f_fdbf, v_fdbf, marker="s", s=25, c='k',
+        #                   edgecolor='k', linewidth=0.8, zorder=-2, label='FDBF')
 
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = OrderedDict(zip(labels, handles))
