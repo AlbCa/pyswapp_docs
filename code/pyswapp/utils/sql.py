@@ -471,7 +471,10 @@ class SQL:
         for v_idx, vel in enumerate(velocities):
             block = df[df.velocity == vel]
             block = block.sort_values('f_id')
-            FV[v_idx, :] = block['re'].values + 1j * block['im'].values
+            try:
+                FV[v_idx, :] = block['re'].values + 1j * block['im'].values
+            except TypeError:
+                FV[v_idx, :] = block['re'].values
 
         wavenumbers = df.groupby('velocity')['wavenumber'].first().values
 
