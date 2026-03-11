@@ -1,12 +1,21 @@
-from swa import *
+#!/usr/bin/env python
+# coding: utf-8
 
-# %% Create the geometry.csv from raw data if it exists
+# # 1. geometry file generation
 
-# directories
-prj_dir = '../data/syn_data'
-path2raw = os.path.join(prj_dir,'raw')
-path2geom = f'{prj_dir}/geometry.csv'
-ext = '.sgy' # shot file extension
+# Create the geometry file automatically if the seismic raw data contains information on source & receiver location.
 
-# create geometry.csv
+from pyswapp import *
+
+
+# #### 1. Set the directories
+
+prj_dir = '../../data/syn_data' # project directory
+path2raw = os.path.join(prj_dir,'raw') # path to raw data
+path2geom = f'{prj_dir}/geometry.csv' # path where geometry file should be stored
+
+
+# #### 2. Call the utilities function
+
 create_geometry(path2raw, path2geom=path2geom)
+

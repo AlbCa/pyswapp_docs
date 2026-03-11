@@ -1,49 +1,102 @@
-import swa.utils
-from swa import *
+#!/usr/bin/env python
+# coding: utf-8
 
-# %% MASW2D
-# directories
-prj_dir = '../data/syn_data'
-path2raw = os.path.join(prj_dir,'raw')
-path2geom = f'{prj_dir}/geometry_v2_test.csv'
-ext = '.sgy' # shot file extension
+# # 2. MASW2D Manager
 
-procset = 'proc1' # processing set label
+# Using the MASW2DManager
 
-# processing and plotting settings
-settings = create_settings(fmin=10, fmax=50,                  # frequency range
-                         vmin=10, vmax=1000, velstep=1)     # testing phase velocity range and step
+from pyswapp import *
 
-swam = MASW2DManager(f'{prj_dir}/proc/3b_MASW2D',path2raw=path2raw,path2geom=path2geom, settings=settings, overwrite=True)
 
-# load data from database based on procset label
-swam.load_procset('proc1')
+# ### 1. Set the directories
 
-# set a new procset label
-swam.set_procset_label(procset)
+prj_dir = '../../data/syn_data' # project directory
+path2raw = os.path.join(prj_dir,'raw') # path to raw data
+path2geom = f'{prj_dir}/geometry.csv' # path to the geometry file
 
-#apply preprocessing step to the whole data (apply_to = 'all')
+
+# ### 2. User defined settings for processing and plotting
+
+settings = create_settings(fmin=1, fmax=100,                  # frequency range
+                           vmin=10, vmax=1000, velstep=1)     # testing phase velocity range and step
+
+
+# ### 3. Basic Operations
+
+# The MASW2DManager class is tailored for 2D processing, i.e., automatically applies all operations to the whole dataset unless otherwise specified.
+
+# #### 3.1 Create a new project
+
+# Create a new project from scratch
+
+swam = MASW2DManager(f'{prj_dir}/proc/2a_MASW2D',             # project directory path
+                   path2raw=path2raw,                       # optional, copy & per default rename data from path (outside project directory)
+                   path2geom=path2geom,                     # optional, copy geom from path (outside project directory)
+                   settings=settings,                       # optional, define settings for visualisations and processing
+                   rename = False,                          # optional, rename copied raw data to preferred filename format (Shotfile_<index>), default value is False!
+                   overwrite = False,                       # optional, overwrite database .db file if it already exists --> create new project data base
+                   )
+
+
+# #### 3.2 Load a project
+
+# Load an existing project
+
+swam = MASW2DManager(f'{prj_dir}/proc/2a_MASW2D') # project directory path
+
+
+# #### 3.3 Preprocess data
+
+# Apply one or several pre-processing options to the whole dataset
+
+# 3.3.1 Trimming
+
 processing_kwargs = {'min': 1, 'max': 1e10} # arguments for the processing
 swam.preprocess(type='trim',by = 'offset',**processing_kwargs)
 
-# remove zero amplitude data
+
+# 3.3.2 MISC
+
+# remove traces of zero amplitude
 swam.preprocess(type='check_traces')
 
-# wave-field transformation
-swam.transform(method='radon')
-swam.transform(method='fdbf')
+
+# ### 4. Wave-field transformations
+
+# Perform wavefield transformation based on the phaseshift, fdbfm or radon transform
+
+swam.transform(method = 'fdbf')
+
+
+# ### 5. Manual dispersion curve extraction
+
+# Manually extract dispersion curves based on picking
 
 # manual dc picking
 swam.gui_interact('pick')
 
-# automatic dc picking
-swam.extract(method = 'max') # method here can be 'max' or the trafo method
 
-# automatic dc picking
+# ### 6. Automatic dispersion curve extraction
+
+# Automatically extract dispersion curves based on maximum amplitudes or mopa
+
+# automatic dispersion curve extraction using max
+swam.extract(method = 'max')
+
+
+# automatic dispersion curve extraction using MOPA
 swam.extract(method = 'MOPA', stopAtChi2 = 1, abs_err = 0.01)
 
+
+# #### 7. Plotting
+
+# Plot the pseudosection
+
 # plot the corresponding pseudosections
-swam.plot('pseudosection',method = 'phaseshift')
 swam.plot('pseudosection',method = 'fdbf')
 swam.plot('pseudosection',method = 'max')
 swam.plot('pseudosection',method = 'MOPA')
+
+
+
+
