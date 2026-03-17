@@ -1088,6 +1088,13 @@ class DataSwitcherFilter(DataSwitcherBase):
 
         self.write_current_filtered_data(self.stream, self.flag, sin, rep, wid)
 
+        for sin_, rep_, wid_ in self.labels:
+            if not self._uniq_per_rep and rep_ != rep:
+                self.write_current_filtered_data(self.stream, self.flag, sin, rep_, wid)
+
+            if not self._uniq_per_wid and wid_ != wid:
+                self.write_current_filtered_data(self.stream, self.flag, sin, rep, wid_)
+
     def interact_delete(self):
         """Delete data from database."""
 
