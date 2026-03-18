@@ -939,6 +939,59 @@ class BaseManager:
 
         self._save(procset, method,dc_mode, use_windows, **kwargs)
 
+    def save_stream(self, procset=None):
+        """save stream in .mseed file format"""
+
+        if procset is None:
+            procset = self._procset
+
+        sin, rep = self.selected_ids
+        stream = self.data[sin][rep]
+        pre = stream.pre
+
+        dir_path = os.path.join(self.prjdir, f'03_proc/{procset}/streams/')
+        safe_makedirs(dir_path)
+
+        stream.save_stream(dir_path, pre)
+
+    def save_streams(self, procset = None, apply_to = 'all'):
+        """save streams in .mseed file format"""
+
+        if procset is None:
+            procset = self._procset
+
+        dir_path = os.path.join(self.prjdir, f'03_proc/{procset}/streams/')
+
+        # Apply process to current selection only
+        if apply_to == 'cur':
+            if self.current_stream is None:
+                self.select_data(inplace = True, verbose=False)
+
+            starttime = time.time()
+            print(f'Save seismic stream corresponding to (SIN,REP) = ({self.selected_ids[0]}, {self.selected_ids[1]})'
+                  f' to "{dir_path}" ..... ', end = '')
+            self.save_stream(procset=procset)
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
+
+        # Apply process to all data sets
+        elif apply_to == 'all':
+            starttime = time.time()
+
+            for sin in self.data.keys():
+                for rep in self.data[sin].keys():
+
+                    self.select_data(sin, rep, inplace=True, verbose=False)
+
+                    sys.stdout.write(f'\rSave seismic stream corresponding to (SIN,REP) = '
+                          f'({sin}, {rep}) to "{dir_path}" ..... ')
+                    sys.stdout.flush()
+
+                    self.save_stream(procset=procset)
+
+            endtime = time.time()
+            print(f'{np.round(endtime - starttime, 2)} s')
+
     def _plot(self, type='seismogram', procset = None, use_windows=True, **kwargs):
         """plot portions of the stream data"""
 
