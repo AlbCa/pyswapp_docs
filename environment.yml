@@ -10,3 +10,5 @@ dependencies:
     - scipy
     - pyqt
     - ipython
+    - jupyter
+    - pip

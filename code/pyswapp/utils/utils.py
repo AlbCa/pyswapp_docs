@@ -218,7 +218,7 @@ def create_geometry(path2raw: str, path2geom: str = "geometry.csv") -> None:
     path2geom: str, path to geometry file
     """
 
-    from swa.stream import SeismicStream
+    from pyswapp.stream import SeismicStream
 
     logger = create_logging(name="Create Geometry")
 
