@@ -1083,17 +1083,25 @@ class DataSwitcherFilter(DataSwitcherBase):
     def interact_save(self):
         """Save filtered data to database."""
 
+        def non_uniq(stream, sin, rep,wid):
+            _ = self._set_data(stream, sin, rep, self.procset, wid)
+            stream, flag = self.apply_filter(stream, sin, rep, wid)
+            self.write_current_filtered_data(stream, flag, sin, rep, wid)
+
         label = self.labels[self.current_index]
         sin, rep, wid = label
 
         self.write_current_filtered_data(self.stream, self.flag, sin, rep, wid)
 
         for sin_, rep_, wid_ in self.labels:
+
+            stream = self.select_data(sin, rep)
+
             if not self._uniq_per_rep and rep_ != rep:
-                self.write_current_filtered_data(self.stream, self.flag, sin, rep_, wid)
+                non_uniq(stream, sin, rep_, wid)
 
             if not self._uniq_per_wid and wid_ != wid:
-                self.write_current_filtered_data(self.stream, self.flag, sin, rep, wid_)
+                non_uniq(stream, sin, rep, wid_)
 
     def interact_delete(self):
         """Delete data from database."""
