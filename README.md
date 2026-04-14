@@ -112,6 +112,13 @@ dependencies:
     cd code
     pip install .
 
+## Reference
+
+    Roser, N., Barone, I., Carrera, A., Flores Orozco, A., 2026. 
+    pySWApp - An interactive, open-source Python toolbox for processing seismic surface wave data.  
+    Computers and Geosciences
+    [In Preparation]
+
 ## License
 
 All source code is made available under the MIT License. See LICENSE.md for 
