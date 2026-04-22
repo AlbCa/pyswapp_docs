@@ -257,6 +257,14 @@
     "and this one after smoothing  \n",
     "<img src=\"../../data/real_data/proc/masw2D/04_figs/pseudo_masw2D_smooth.png\" width=\"800\">"
    ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "2e45924a-2c68-4601-bfd0-55ebeb5f45c0",
+   "metadata": {},
+   "source": [
+    "```{image} ../../data/real_data/proc/masw2D/04_figs/pseudo_masw2D.png"
+   ]
   }
  ],
  "metadata": {
